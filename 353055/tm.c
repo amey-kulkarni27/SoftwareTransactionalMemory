@@ -28,6 +28,7 @@
 // Internal headers
 #include <tm.h>
 #include <data_structures.h>
+#include <helper_functions.h>
 
 #include "macros.h"
 
@@ -175,7 +176,6 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
 
     MemoryRegion* region = (MemoryRegion*) shared;
-    Transaction* t = (Transaction*)tx;
 
     SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
     if(unlikely(!s_node))
@@ -218,7 +218,36 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
  * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
 **/
-bool tm_free(shared_t unused(shared), tx_t unused(tx), void* unused(target)) {
+bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     // TODO: tm_free(shared_t, tx_t, void*)
-    return false;
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+
+    pthread_mutex_lock(&(region->allocation_lock));
+    SegmentNode* reqNode = getNode(region, target);
+    if(reqNode == region->alloced_segments){
+        region->alloced_segments = reqNode->next;
+        if(reqNode->next)
+            reqNode->next->prev = NULL; // first node in the LL
+    }
+    else{
+        SegmentNode* prev = reqNode->prev;
+        if(reqNode->next){
+            prev->next = reqNode->next;
+            reqNode->next->prev = prev;
+        }
+        else
+            prev->next = NULL;
+    }
+    pthread_mutex_unlock(&(region->allocation_lock));
+
+    // free up the contents of the segment
+    free(reqNode->lock_version_number);
+    free(reqNode->lock_bit);
+    free(reqNode->shared_segment);
+    // free up the node itself
+    free(reqNode);
+
+
+    return true;
 }
