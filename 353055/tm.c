@@ -44,14 +44,14 @@ shared_t tm_create(size_t size, size_t align) {
     }
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
-    if (unlikely(posix_memalign(&(region->startSegment), align, size) != 0)) {
+    if (unlikely(posix_memalign(&(region->start_segment), align, size) != 0)) {
         free(region);
         return invalid_shared;
     }
 
-    region -> globalClock = 0;
-    memset(region->startSegment, 0, size);
-    region -> allocedSegments = NULL;
+    region -> global_clock = 0;
+    memset(region->start_segment, 0, size);
+    region -> alloced_segments = NULL;
     region -> size = size;
     region -> align = align;
 }
@@ -62,12 +62,12 @@ shared_t tm_create(size_t size, size_t align) {
 void tm_destroy(shared_t shared) {
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
-    while(region -> allocedSegments){
-        SegmentNode *nxt = region -> allocedSegments -> next;
-        free(region -> allocedSegments);
-        region -> allocedSegments = nxt;
+    while(region -> alloced_segments){
+        SegmentNode *nxt = region -> alloced_segments -> next;
+        free(region -> alloced_segments);
+        region -> alloced_segments = nxt;
     }
-    free(region -> startSegment);
+    free(region -> start_segment);
     free(region);
 }
 
@@ -77,7 +77,7 @@ void tm_destroy(shared_t shared) {
 **/
 void* tm_start(shared_t shared) {
     // TODO: tm_start(shared_t)
-    return ((MemoryRegion*) shared) -> startSegment;
+    return ((MemoryRegion*) shared) -> start_segment;
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -103,9 +103,27 @@ size_t tm_align(shared_t shared) {
  * @param is_ro  Whether the transaction is read-only
  * @return Opaque transaction ID, 'invalid_tx' on failure
 **/
-tx_t tm_begin(shared_t unused(shared), bool unused(is_ro)) {
+tx_t tm_begin(shared_t shared, bool is_ro) {
     // TODO: tm_begin(shared_t)
-    return invalid_tx;
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+
+    // Initialising the transaction
+    Transaction* t = (Transaction*) malloc(sizeof(Transaction));
+    if(!t)
+        return invalid_tx;
+    t -> region = region;
+    t -> is_ro = is_ro;
+    t -> rv = region -> global_clock; // Sampling the global clock for the read phase
+    // the following will update the number of reads and writes as they see them
+    t -> num_reads = 0;
+    t -> num_writes = 0;
+    // the numbers will denote the number of items in the respective linked list, not the actual read/writes of the transaction seen so far
+    t -> read_addresses = NULL;
+    t -> write_addresses = NULL;
+    t -> write_vals = NULL;
+
+    return (tx_t)t;
 }
 
 /** [thread-safe] End the given transaction.
@@ -151,8 +169,12 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(sourc
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
-alloc_t tm_alloc(shared_t unused(shared), tx_t unused(tx), size_t unused(size), void** unused(target)) {
+alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+    Transaction* t = (Transaction*)tx;
+    
     return abort_alloc;
 }
 
