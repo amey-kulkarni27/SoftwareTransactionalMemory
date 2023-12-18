@@ -124,7 +124,6 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
     // the numbers will denote the number of items in the respective linked list, not the actual read/writes of the transaction seen so far
     t -> read_addresses = NULL;
     t -> write_addresses = NULL;
-    t -> write_vals = NULL;
 
     return (tx_t)t;
 }
@@ -147,9 +146,62 @@ bool tm_end(shared_t unused(shared), tx_t unused(tx)) {
  * @param target Target start address (in a private region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
+bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
     // TODO: tm_read(shared_t, tx_t, void const*, size_t, void*)
-    return false;
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+    Transaction* t = (Transaction*) tx;
+
+    // sampling the global clock
+    t -> rv = region -> global_clock;
+    
+    // Convert to char* pointers, so that the difference of the pointers represents the bytes in between
+    const char* source_bytes = (const char*)source;
+    char* target_bytes = (char*)target;
+
+    SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
+    size_t diff = source_bytes - (char *)(req_node->shared_segment);
+    size_t start_word = diff / (region->align), num_words = size / (region->align);
+    if(t -> is_ro){
+        for(size_t i = 0; i < num_words; i++){
+            size_t cur_word = start_word + i;
+            // sample lock bit and version number
+            uint32_t v_before = (req_node->lock_version_number)[cur_word];
+            memcpy(target_bytes, source_bytes, region->align);
+            source_bytes += region->align;
+            target_bytes += region->align;
+            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv))
+                return false;
+        }
+    }
+    else{
+        for(size_t i = 0; i < num_words; i++){
+            size_t cur_word = start_word + i;
+            
+            // If we have already written at this address
+            LLNode* writtenNode = getWriteNode(source_bytes, t->write_addresses); // returns NULL if this address does not exist
+            
+            // sample lock bit and version number
+            uint32_t v_before = (req_node->lock_version_number)[cur_word];
+            if(writtenNode)
+                memcpy(target_bytes, writtenNode->value, region->align);
+            else
+                memcpy(target_bytes, source_bytes, region->align);
+
+            // Create a new node for reading the value
+            LLNode* newReadNode = (LLNode*) malloc(sizeof(LLNode));
+            newReadNode -> word_num = cur_word;
+            newReadNode -> location = source_bytes;
+            newReadNode -> next = t -> read_addresses;
+            t -> read_addresses = newReadNode;
+
+            source_bytes += region->align;
+            target_bytes += region->align;
+            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv))
+                return false;
+        }
+    }
+    return true;
 }
 
 /** [thread-safe] Write operation in the given transaction, source in a private region and target in the shared region.
@@ -160,9 +212,38 @@ bool tm_read(shared_t unused(shared), tx_t unused(tx), void const* unused(source
  * @param target Target start address (in the shared region)
  * @return Whether the whole transaction can continue
 **/
-bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(source), size_t unused(size), void* unused(target)) {
+bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
     // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
-    return false;
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+    Transaction* t = (Transaction*) tx;
+    
+    // keep inserting write addresses and values to the start
+    // remove duplicates in end, keep the most recent (closer to the start)
+    const char* source_bytes = (const char*)source;
+    char* target_bytes = (char*)target;
+
+    SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
+    size_t diff = source_bytes - (char *)(req_node->shared_segment);
+    size_t start_word = diff / (region->align), num_words = size / (region->align);
+    for(size_t i = 0; i < num_words; i++){
+        size_t cur_word = start_word + i;
+        // Create a new node for writing the value
+        LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
+        newWriteNode -> word_num = cur_word;
+        newWriteNode -> location = target_bytes;
+        void* buffer = (void*) malloc(sizeof(region->align));
+        memcpy(buffer, source_bytes, region->align);
+        newWriteNode -> value = buffer; // storing the value in this buffer
+        newWriteNode -> next = t -> write_addresses;
+        t -> write_addresses = newWriteNode;
+        newWriteNode->next = t->write_addresses;
+
+        source_bytes += region->align;
+        target_bytes += region->align;
+    }
+
+    return true;
 }
 
 /** [thread-safe] Memory allocation in the given transaction.
@@ -224,17 +305,17 @@ bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     MemoryRegion* region = (MemoryRegion*) shared;
 
     pthread_mutex_lock(&(region->allocation_lock));
-    SegmentNode* reqNode = getNode(region, target);
-    if(reqNode == region->alloced_segments){
-        region->alloced_segments = reqNode->next;
-        if(reqNode->next)
-            reqNode->next->prev = NULL; // first node in the LL
+    SegmentNode* req_node = getNode(region, target);
+    if(req_node == region->alloced_segments){
+        region->alloced_segments = req_node->next;
+        if(req_node->next)
+            req_node->next->prev = NULL; // first node in the LL
     }
     else{
-        SegmentNode* prev = reqNode->prev;
-        if(reqNode->next){
-            prev->next = reqNode->next;
-            reqNode->next->prev = prev;
+        SegmentNode* prev = req_node->prev;
+        if(req_node->next){
+            prev->next = req_node->next;
+            req_node->next->prev = prev;
         }
         else
             prev->next = NULL;
@@ -242,11 +323,11 @@ bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     pthread_mutex_unlock(&(region->allocation_lock));
 
     // free up the contents of the segment
-    free(reqNode->lock_version_number);
-    free(reqNode->lock_bit);
-    free(reqNode->shared_segment);
+    free(req_node->lock_version_number);
+    free(req_node->lock_bit);
+    free(req_node->shared_segment);
     // free up the node itself
-    free(reqNode);
+    free(req_node);
 
 
     return true;

@@ -30,7 +30,9 @@ typedef struct MemoryRegion{
 }MemoryRegion;
 
 typedef struct LLNode{
-    void* data; // pointer to either a stored address or a stored value
+    uint32_t word_num; // word number along with start of the segment gives us all the necessary location
+    void* location; // pointer to the address of the memory location to be written
+    void* value; // pointer to the value written to this memory location
     LLNode* next;
 }LLNode;
 
@@ -45,6 +47,5 @@ typedef struct Transaction
     LLNode* read_addresses; // head of read-set addresses
     // write set
     uint32_t num_writes; // size of write LL
-    LLNode* write_addresses; // head of write-set addresses
-    LLNode* write_vals; // head of write-set values
+    LLNode* write_addresses; // head of write-set addresses (nodes contain value as well)
 }Transaction;
