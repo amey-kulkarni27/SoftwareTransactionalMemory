@@ -110,7 +110,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
 
     // Initialising the transaction
     Transaction* t = (Transaction*) malloc(sizeof(Transaction));
-    if(!t)
+    if(unlikely(!t))
         return invalid_tx;
     t -> region = region;
     t -> is_ro = is_ro;
@@ -169,13 +169,39 @@ bool tm_write(shared_t unused(shared), tx_t unused(tx), void const* unused(sourc
  * @param target Pointer in private memory receiving the address of the first byte of the newly allocated, aligned segment
  * @return Whether the whole transaction can continue (success/nomem), or not (abort_alloc)
 **/
-alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
+alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     // TODO: tm_alloc(shared_t, tx_t, size_t, void**)
 
     MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*)tx;
+
+    SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
+    if(unlikely(!s_node))
+        return nomem_alloc;
+
+    s_node -> prev = NULL;
+    s_node -> next = region -> alloced_segments;
+    if(s_node -> next)
+        s_node -> next -> prev = s_node;
+    region -> alloced_segments = s_node;
+
+    s_node -> size = size;
+    if(posix_memalign(&(s_node->shared_segment), region->align, size) != 0)
+        return nomem_alloc;
+    memset(s_node->shared_segment, 0, size); // initialising the segment with 0s
+    s_node -> num_words = size / (region->align);
+
+    s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
+    if(!(s_node->lock_bit))
+        return nomem_alloc;
+    memset(s_node->lock_bit, 0, (s_node->num_words) * sizeof(atomic_bool)); // lock bits initially set to 0
     
-    return abort_alloc;
+    s_node -> lock_version_number = (uint32_t*) malloc((s_node->num_words) * sizeof(uint32_t));
+    if(!(s_node->lock_version_number))
+        return nomem_alloc;
+    memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t));
+
+    return success_alloc;
 }
 
 /** [thread-safe] Memory freeing in the given transaction.

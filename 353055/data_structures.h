@@ -11,6 +11,7 @@ typedef struct SegmentNode {
     struct SegmentNode* prev;
     struct SegmentNode* next;
     size_t size;
+    void* shared_segment; // actual segment where the reads and writes happen
     uint32_t num_words;
     atomic_bool* lock_bit; // each word has a lock bit
     uint32_t* lock_version_number; // each word lock has a version number denoting the last timestamp when it was written to
@@ -20,7 +21,7 @@ typedef struct SegmentNode {
 typedef struct MemoryRegion{
 	atomic_long global_clock; // global clock for TL2
 	void* start_segment; // pointer to non-deallocable first segment
-    SegmentNode* alloced_segments; // segments alloced through tm_alloc
+    SegmentNode* alloced_segments; // segments alloced through tm_alloc, points to head
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
 }MemoryRegion;
