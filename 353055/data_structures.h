@@ -34,6 +34,7 @@ typedef struct LLNode{
     void* location; // pointer to the address of the memory location to be written
     void* value; // pointer to the value written to this memory location
     LLNode* next;
+    SegmentNode* corresponding_segment;
 }LLNode;
 
 

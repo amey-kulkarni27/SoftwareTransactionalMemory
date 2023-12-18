@@ -133,9 +133,49 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
  * @param tx     Transaction to end
  * @return Whether the whole transaction committed
 **/
-bool tm_end(shared_t unused(shared), tx_t unused(tx)) {
+bool tm_end(shared_t shared, tx_t tx) {
     // TODO: tm_end(shared_t, tx_t)
-    return false;
+
+    MemoryRegion* region = (MemoryRegion*) shared;
+    Transaction* t = (Transaction*) tx;
+
+    // Remove duplicates if required (current implementation duplicates are never added in the first place)
+
+    // Acquire all the locks for the write set
+    LLNode* write_node = t -> write_addresses;
+    if(!acquireLocks(write_node, region->align)){
+        cleanTransaction(t);
+        return false;
+    }
+
+    // Increment and store global clock
+    long wv = atomic_fetch_add(&(region->global_clock), 1);
+    wv++;
+
+    // Validate the read set
+    // if rv + 1 = wv, we're good
+    if(wv == (t->rv) + 1);
+    else{
+        // go to each read memory location, check if the lock is either free or taken by the current transaction and its version number is ≤ rv
+        LLNode* read_node = t -> read_addresses;
+        while(read_node){
+            if(!validate(read_node, region->align, t->write_addresses, t->rv)){
+                cleanTransaction(t);
+                return false;
+            }
+            read_node = read_node -> next;
+        }
+    }
+
+    // Commit
+    // Set value at shared location to current value
+    // Update the version to wv
+    // Clear the lock bit
+    writeToLocations(write_node, region->align, wv);
+
+    cleanTransaction(t);
+
+    return true;
 }
 
 /** [thread-safe] Read operation in the given transaction, source in the shared region and target in a private region.
@@ -192,13 +232,16 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             LLNode* newReadNode = (LLNode*) malloc(sizeof(LLNode));
             newReadNode -> word_num = cur_word;
             newReadNode -> location = source_bytes;
+            newReadNode -> corresponding_segment = req_node;
             newReadNode -> next = t -> read_addresses;
             t -> read_addresses = newReadNode;
 
             source_bytes += region->align;
             target_bytes += region->align;
-            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv))
+            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv)){
+                free(newReadNode);
                 return false;
+            }
         }
     }
     return true;
@@ -220,24 +263,35 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     
     // keep inserting write addresses and values to the start
     // remove duplicates in end, keep the most recent (closer to the start)
+
+    // for now, search if the same address already exists before adding every element
+
     const char* source_bytes = (const char*)source;
     char* target_bytes = (char*)target;
 
-    SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
-    size_t diff = source_bytes - (char *)(req_node->shared_segment);
+    SegmentNode* req_node = nodeFromWordAddress(region, target_bytes);
+    size_t diff = target_bytes - (char *)(req_node->shared_segment);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     for(size_t i = 0; i < num_words; i++){
         size_t cur_word = start_word + i;
-        // Create a new node for writing the value
-        LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
-        newWriteNode -> word_num = cur_word;
-        newWriteNode -> location = target_bytes;
-        void* buffer = (void*) malloc(sizeof(region->align));
-        memcpy(buffer, source_bytes, region->align);
-        newWriteNode -> value = buffer; // storing the value in this buffer
-        newWriteNode -> next = t -> write_addresses;
-        t -> write_addresses = newWriteNode;
-        newWriteNode->next = t->write_addresses;
+
+        LLNode* writtenNode = getWriteNode(target_bytes, t->write_addresses); // returns NULL if this address does not exist
+        // If we have already written at this address
+        if(writtenNode)
+            memcpy(writtenNode -> value, source_bytes, region->align);
+        else{
+            // Create a new node for writing the value
+            LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
+            newWriteNode -> word_num = cur_word;
+            newWriteNode -> location = target_bytes;
+            void* buffer = (void*) malloc(sizeof(region->align));
+            memcpy(buffer, source_bytes, region->align);
+            newWriteNode -> value = buffer; // storing the value in this buffer
+            newWriteNode -> corresponding_segment = req_node;
+            newWriteNode -> next = t -> write_addresses;
+            t -> write_addresses = newWriteNode;
+            newWriteNode->next = t->write_addresses;
+        }
 
         source_bytes += region->align;
         target_bytes += region->align;
