@@ -52,6 +52,7 @@ shared_t tm_create(size_t size, size_t align) {
     region -> global_clock = 0;
     memset(region->start_segment, 0, size);
     region -> alloced_segments = NULL;
+    pthread_mutex_init(&(region->allocation_lock), NULL);
     region -> size = size;
     region -> align = align;
 }
@@ -67,6 +68,7 @@ void tm_destroy(shared_t shared) {
         free(region -> alloced_segments);
         region -> alloced_segments = nxt;
     }
+    pthread_mutex_destroy(&(region->allocation_lock));
     free(region -> start_segment);
     free(region);
 }
@@ -180,10 +182,13 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
         return nomem_alloc;
 
     s_node -> prev = NULL;
+    // Since region is shared by all segments
+    pthread_mutex_lock(&(region->allocation_lock));
     s_node -> next = region -> alloced_segments;
     if(s_node -> next)
         s_node -> next -> prev = s_node;
     region -> alloced_segments = s_node;
+    pthread_mutex_unlock(&(region->allocation_lock));
 
     s_node -> size = size;
     if(posix_memalign(&(s_node->shared_segment), region->align, size) != 0)

@@ -2,6 +2,8 @@
 
 #include <stdio.h>
 #include <stdatomic.h>
+#include <pthread.h>
+
 
 // Every memory location (some unit) should have a lock that has a lock bit and a lock version number
 // This version number denotes the last timestamp at which the data was written to
@@ -22,6 +24,7 @@ typedef struct MemoryRegion{
 	atomic_long global_clock; // global clock for TL2
 	void* start_segment; // pointer to non-deallocable first segment
     SegmentNode* alloced_segments; // segments alloced through tm_alloc, points to head
+    pthread_mutex_t allocation_lock; // since (de)allocations can happen concurrently
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
 }MemoryRegion;
