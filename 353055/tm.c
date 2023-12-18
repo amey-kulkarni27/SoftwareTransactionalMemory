@@ -204,7 +204,10 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     s_node -> lock_version_number = (uint32_t*) malloc((s_node->num_words) * sizeof(uint32_t));
     if(!(s_node->lock_version_number))
         return nomem_alloc;
-    memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t));
+    memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
+
+    *target = s_node -> shared_segment;
+    // given an address, we have to do a linear search through the nodes of segments to find the right one
 
     return success_alloc;
 }
