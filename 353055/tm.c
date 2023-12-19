@@ -226,11 +226,12 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             
             // sample lock bit and version number
             uint32_t v_before = (req_node->lock_version_number)[cur_word];
-            if(writtenNode)
+            if(writtenNode){
                 memcpy(target_bytes, writtenNode->value, region->align);
-            else
+            }
+            else{
                 memcpy(target_bytes, source_bytes, region->align);
-
+            }
             // Create a new node for reading the value
             LLNode* newReadNode = (LLNode*) malloc(sizeof(LLNode));
             newReadNode -> word_num = cur_word;
@@ -273,6 +274,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     char* target_bytes = (char*)target;
 
     SegmentNode* req_node = nodeFromWordAddress(region, target_bytes);
+
     size_t diff = target_bytes - (char *)(req_node->shared_segment);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     for(size_t i = 0; i < num_words; i++){
@@ -293,7 +295,6 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
             newWriteNode -> corresponding_segment = req_node;
             newWriteNode -> next = t -> write_addresses;
             t -> write_addresses = newWriteNode;
-            newWriteNode->next = t->write_addresses;
         }
 
         source_bytes += region->align;
@@ -318,6 +319,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
     if(unlikely(!s_node))
         return nomem_alloc;
+    
 
     s_node -> prev = NULL;
     // Since region is shared by all segments
