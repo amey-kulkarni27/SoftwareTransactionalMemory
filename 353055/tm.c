@@ -24,11 +24,12 @@
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 // Internal headers
 #include <tm.h>
-#include <data_structures.h>
-#include <helper_functions.h>
+#include "data_structures.h"
+#include "helper_functions.h"
 
 #include "macros.h"
 
@@ -56,6 +57,8 @@ shared_t tm_create(size_t size, size_t align) {
     pthread_mutex_init(&(region->allocation_lock), NULL);
     region -> size = size;
     region -> align = align;
+
+    return (shared_t) region;
 }
 
 /** Destroy (i.e. clean-up + free) a given shared memory region.
@@ -143,7 +146,7 @@ bool tm_end(shared_t shared, tx_t tx) {
 
     // Acquire all the locks for the write set
     LLNode* write_node = t -> write_addresses;
-    if(!acquireLocks(write_node, region->align)){
+    if(!acquireLocks(write_node)){
         cleanTransaction(t);
         return false;
     }
@@ -159,7 +162,7 @@ bool tm_end(shared_t shared, tx_t tx) {
         // go to each read memory location, check if the lock is either free or taken by the current transaction and its version number is ≤ rv
         LLNode* read_node = t -> read_addresses;
         while(read_node){
-            if(!validate(read_node, region->align, t->write_addresses, t->rv)){
+            if(!validate(read_node, t->write_addresses, t->rv)){
                 cleanTransaction(t);
                 return false;
             }
@@ -196,7 +199,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     t -> rv = region -> global_clock;
     
     // Convert to char* pointers, so that the difference of the pointers represents the bytes in between
-    const char* source_bytes = (const char*)source;
+    char* source_bytes = (char*)source;
     char* target_bytes = (char*)target;
 
     SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
