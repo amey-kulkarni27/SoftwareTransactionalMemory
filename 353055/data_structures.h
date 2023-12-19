@@ -23,7 +23,7 @@ typedef struct SegmentNode {
 typedef struct MemoryRegion{
 	atomic_long global_clock; // global clock for TL2
 	void* start_segment; // pointer to non-deallocable first segment
-    SegmentNode* alloced_segments; // segments alloced through tm_alloc, points to head
+    struct SegmentNode* alloced_segments; // segments alloced through tm_alloc, points to head
     pthread_mutex_t allocation_lock; // since (de)allocations can happen concurrently
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
@@ -33,7 +33,7 @@ typedef struct LLNode{
     uint32_t word_num; // word number along with start of the segment gives us all the necessary location
     void* location; // pointer to the address of the memory location to be written
     void* value; // pointer to the value written to this memory location
-    LLNode* next;
+    struct LLNode* next;
     SegmentNode* corresponding_segment;
 }LLNode;
 

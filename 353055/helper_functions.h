@@ -1,8 +1,9 @@
 #pragma once
 
 #include <stdio.h>
+#include <stdbool.h>
 
-#include <data_structures.h>
+#include "data_structures.h"
 
 SegmentNode* getNode(MemoryRegion* region, void *segment_start){
     SegmentNode* curNode = region -> alloced_segments;
@@ -29,20 +30,21 @@ SegmentNode* nodeFromWordAddress(MemoryRegion* region, const char* address_searc
 
 LLNode* getWriteNode(void* source_address, LLNode* cur_node){
     while(cur_node){
-        if(cur_node->location == cur_node)
+        if(cur_node->location == source_address)
             break;
         cur_node = cur_node->next;
     }
     return cur_node;
 }
 
-bool acquireLocks(LLNode* write_node, size_t align){
+bool acquireLocks(LLNode* write_node){
     LLNode* cur = write_node;
     bool success = true;
     while(cur){
         SegmentNode* segment = cur -> corresponding_segment;
         size_t word = cur -> word_num;
-        if(!atomic_compare_exchange_strong(&(segment->lock_bit[word]), 0, 1)){
+        atomic_bool expected = false;
+        if(!atomic_compare_exchange_strong(&(segment->lock_bit[word]), &expected, true)){
             success = false;
             break;
         }
@@ -76,7 +78,7 @@ void cleanTransaction(Transaction* t){
     free(t);
 }
 
-bool validate(LLNode* read_node, size_t align, LLNode* write_node, u_int32_t rv){
+bool validate(LLNode* read_node, LLNode* write_node, u_int32_t rv){
     SegmentNode* read_segment = read_node -> corresponding_segment;
     size_t word = read_node -> word_num;
     if((read_segment->lock_bit)[word] == 1){
