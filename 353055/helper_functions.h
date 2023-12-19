@@ -6,25 +6,27 @@
 #include "data_structures.h"
 
 SegmentNode* getNode(MemoryRegion* region, void *segment_start){
-    SegmentNode* curNode = region -> alloced_segments;
-    while(curNode != NULL){
-        if(curNode->shared_segment == segment_start)
+    SegmentNode* cur_node = region -> alloced_segments;
+    while(cur_node != NULL){
+        if(cur_node->shared_segment == segment_start)
             break;
-        curNode = curNode -> next;
+        cur_node = cur_node -> next;
     }
-    return curNode;
+    return cur_node;
 }
 
 // A bit unsure about this implementation
 SegmentNode* nodeFromWordAddress(MemoryRegion* region, const char* address_search){
-    SegmentNode* curNode = region -> alloced_segments;
-    while(curNode != NULL){
-        size_t difference = (char*)curNode - address_search;
-        if(difference + curNode->shared_segment == address_search)
+    SegmentNode* cur_node = region -> alloced_segments;
+    while(cur_node != NULL){
+        char* node_start = (char*)(cur_node->shared_segment);
+        size_t difference = address_search - node_start;
+        if((node_start <= address_search) && (difference < (cur_node->size))){
             break;
-        curNode = curNode -> next;
+        }
+        cur_node = cur_node -> next;
     }
-    return curNode;
+    return cur_node;
 }
 
 
