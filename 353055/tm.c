@@ -27,6 +27,7 @@
 #include <stdio.h>
 #include <assert.h>
 #include <pthread.h>
+#include <time.h>
 
 // Internal headers
 #include <tm.h>
@@ -135,6 +136,7 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
  * @return Whether the whole transaction committed
 **/
 bool tm_end(shared_t shared, tx_t tx) {
+    // printf("End\n");
     // TODO: tm_end(shared_t, tx_t)
 
     MemoryRegion* region = (MemoryRegion*) shared;
@@ -197,14 +199,12 @@ bool tm_end(shared_t shared, tx_t tx) {
  * @return Whether the whole transaction can continue
 **/
 bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
+    // printf("Read\n");
     // TODO: tm_read(shared_t, tx_t, void const*, size_t, void*)
 
     MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*) tx;
 
-    // sampling the global clock
-    t -> rv = region -> global_clock;
-    
     // Convert to char* pointers, so that the difference of the pointers represents the bytes in between
     char* source_bytes = (char*)source;
     char* target_bytes = (char*)target;
@@ -240,6 +240,9 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             else{
                 memcpy(target_bytes, source_bytes, region->align);
             }
+            if(((req_node->lock_bit)[cur_word]) || ((req_node->lock_version_number)[cur_word] != v_before) || ((req_node->lock_version_number)[cur_word] > (t->rv))){
+                return false;
+            }
             // Create a new node for reading the value
             LLNode* newReadNode = (LLNode*) malloc(sizeof(LLNode));
             newReadNode -> word_num = cur_word;
@@ -250,10 +253,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
 
             source_bytes += region->align;
             target_bytes += region->align;
-            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv)){
-                free(newReadNode);
-                return false;
-            }
+            
         }
     }
 
@@ -269,6 +269,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
  * @return Whether the whole transaction can continue
 **/
 bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* target) {
+    // printf("Write\n");
     // TODO: tm_write(shared_t, tx_t, void const*, size_t, void*)
 
     MemoryRegion* region = (MemoryRegion*) shared;
@@ -291,7 +292,11 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     for(size_t i = 0; i < num_words; i++){
         size_t cur_word = start_word + i;
 
+        // clock_t start, end;
+        // start = clock();
         LLNode* writtenNode = getWriteNode(target_bytes, t->write_addresses); // returns NULL if this address does not exist
+        // end = clock();
+        // printf("Time taken: %f\n", ((double) (end - start)) / CLOCKS_PER_SEC);
         // If we have already written at this address
         if(writtenNode)
             memcpy(writtenNode -> value, source_bytes, region->align);
