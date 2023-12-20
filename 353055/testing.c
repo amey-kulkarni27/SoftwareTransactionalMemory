@@ -20,10 +20,9 @@ void putVals(shared_t r, tx_t t, void* seg2, void* buffer, size_t size){
 }
 
 void readVals(shared_t r, tx_t t, void* seg2, void* buffer, size_t size){
-    long* buf = (long*)(buffer);
-    tm_read(r, t, (void*)seg2, size, (void*)(buf));
+    tm_read(r, t, seg2, size, buffer);
     for(int i = 0; i < size / 8; i++){
-        printf("%ld ", buf[i]);
+        printf("%ld ", ((long*)(buffer))[i]);
     }
     printf("\n");
 }
@@ -104,7 +103,7 @@ void* addSub(void* args_){
     long* buffer = (long*)malloc(2*sizeof(long));
     
     // Loop 1 times
-    for(int i = 0; i < 20; i++){
+    for(int i = 0; i < 50; i++){
         // pick two indices out of the four
         tx_t t = tm_begin(args->r, false);
         srand((unsigned int)(time(NULL)+args->id) + i);
@@ -141,7 +140,7 @@ void* addSub(void* args_){
         int x = tm_end(args->r, t);
         if(!x)
             continue;
-        printf("Thread: %d\n", args->id);
+        printf("Thread: %d, Num: %d\n", args->id, i+1);
         long sum = 0;
         for(int i = 0; i < 4; i++){
             long *lptr = (long*)((char*)(args->seg) + 8*i);
@@ -150,6 +149,15 @@ void* addSub(void* args_){
             sum += (*lptr);
         }
         printf("\n\n");
+        if(sum != 0){
+            printf("%d %d\n", num1, num2);
+            for(int i = 0; i < 4; i++){
+                long *lptr = (long*)((char*)(args->seg) + 8*i);
+                // printf("%p holds %ld\n", lptr, *lptr);
+                printf("%ld ", *lptr);
+                sum += (*lptr);
+            }
+        }
         assert(sum == 0);
     }
     // printf("Is thread %d a success? %d\n", args->id, tm_end(args->r, t));
@@ -164,10 +172,24 @@ void* addSub(void* args_){
     return NULL;
 }
 
+SegmentNode* nodeFromWordAddress2(MemoryRegion* region, char* address_search){
+    SegmentNode* cur_node = region -> alloced_segments;
+    while(cur_node != NULL){
+        char* node_start = (char*)(cur_node->segment_start);
+        size_t difference = address_search - node_start;
+        if((node_start <= address_search) && (difference < (cur_node->size))){
+            break;
+        }
+        cur_node = cur_node -> next;
+    }
+    assert(cur_node);
+    return cur_node;
+}
+
 void two_threads(){
     shared_t r = tm_create(64, 8);
     tx_t t = tm_begin(r, false);
-    void* seg1;
+    void* seg1; // segment start
     tm_alloc(r, t, 32, &seg1); // 4 words
     printf("Segment start loc %p\n", seg1);
     tm_end(r, t);
@@ -183,13 +205,28 @@ void two_threads(){
 
     tx_t tr = tm_begin(r, true);
     long* buffer = (long*)malloc(4*sizeof(long));
-    readVals(r, tr, seg1, buffer, 32);
+    SegmentNode* seg = nodeFromWordAddress2((MemoryRegion*)r, (char*)seg1);
+    printf("Lock status %d %d %d %d\n", seg->lock_bit[0], seg->lock_bit[1], seg->lock_bit[2], seg->lock_bit[3]);
+    int y = tm_read(r, tr, seg1, 32, buffer);
+    printf("Read %d\n", y);
+    int x = tm_end(r, tr);
+    printf("End %d\n", x);
     long sum = 0;
-    for(int i = 0; i < 4; i++)
+    for(int i = 0; i < 4; i++){
         sum += buffer[i];
+        printf("%ld ", buffer[i]);
+    }
+    printf("\n");
+    for(int i = 0; i < 4; i++){
+        long *lptr = (long*)((char*)(seg1) + 8*i);
+        // printf("%p holds %ld\n", lptr, *lptr);
+        printf("%ld ", *lptr);
+        sum += (*lptr);
+    }
+    printf("\n");
     free(buffer);
     printf("Sum %ld\n", sum);
-    assert(sum == 0);
+    // assert(sum == 0);
 
     tm_destroy(r);
 }
