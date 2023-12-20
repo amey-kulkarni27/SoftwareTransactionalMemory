@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <pthread.h>
 #include <time.h>
+#include <assert.h>
 
 #include "macros.h"
 #include "tm.h"
@@ -140,6 +141,7 @@ void two_threads(){
 int main(){
     // single_playground();
     two_threads();
+    assert(NULL);
     printf("Success\n");
     return 0;
 }

@@ -25,6 +25,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdio.h>
+#include <assert.h>
+#include <pthread.h>
 
 // Internal headers
 #include <tm.h>
@@ -44,19 +46,16 @@ shared_t tm_create(size_t size, size_t align) {
     if (unlikely(!region)) {
         return invalid_shared;
     }
-    // We allocate the shared memory buffer such that its words are correctly
-    // aligned.
-    if (unlikely(posix_memalign(&(region->start_segment), align, size) != 0)) {
-        free(region);
-        return invalid_shared;
-    }
-
     region -> global_clock = 0;
-    memset(region->start_segment, 0, size);
-    region -> alloced_segments = NULL;
-    pthread_mutex_init(&(region->allocation_lock), NULL);
     region -> size = size;
     region -> align = align;
+
+    // We allocate the shared memory buffer such that its words are correctly
+    // aligned.
+    SegmentNode* first_segment = init_node(region, size);
+    region -> start_segment = first_segment -> segment_start;
+    region -> alloced_segments = first_segment;
+    pthread_mutex_init(&(region->allocation_lock), NULL);
 
     return (shared_t) region;
 }
@@ -73,7 +72,6 @@ void tm_destroy(shared_t shared) {
         region -> alloced_segments = nxt;
     }
     pthread_mutex_destroy(&(region->allocation_lock));
-    free(region -> start_segment);
     free(region);
 }
 
@@ -150,8 +148,10 @@ bool tm_end(shared_t shared, tx_t tx) {
 
     // Remove duplicates if required (current implementation duplicates are never added in the first place)
     SegmentNode* req_node = t -> write_addresses -> corresponding_segment;
+    assert(req_node);
     // Acquire all the locks for the write set
     LLNode* write_node = t -> write_addresses;
+    assert(write_node);
     if(!acquireLocks(write_node)){
         cleanTransaction(t);
         return false;
@@ -210,6 +210,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     char* target_bytes = (char*)target;
 
     SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
+    assert(req_node);
     size_t diff = source_bytes - (char *)(req_node->segment_start);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     if(t -> is_ro){
@@ -230,7 +231,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             
             // If we have already written at this address
             LLNode* writtenNode = getWriteNode(source_bytes, t->write_addresses); // returns NULL if this address does not exist
-            
+
             // sample lock bit and version number
             uint32_t v_before = (req_node->lock_version_number)[cur_word];
             if(writtenNode){
@@ -282,6 +283,7 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
     char* target_bytes = (char*)target;
 
     SegmentNode* req_node = nodeFromWordAddress(region, target_bytes);
+    assert(req_node);
 
 
     size_t diff = target_bytes - (char *)(req_node->segment_start);
@@ -325,35 +327,9 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 
     MemoryRegion* region = (MemoryRegion*) shared;
 
-    SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
-    if(unlikely(!s_node))
+    SegmentNode* s_node = init_node(region, size);
+    if(!s_node)
         return nomem_alloc;
-    
-
-    s_node -> prev = NULL;
-    // Since region is shared by all segments
-    pthread_mutex_lock(&(region->allocation_lock));
-    s_node -> next = region -> alloced_segments;
-    if(s_node -> next)
-        s_node -> next -> prev = s_node;
-    region -> alloced_segments = s_node;
-    pthread_mutex_unlock(&(region->allocation_lock));
-
-    s_node -> size = size;
-    if(posix_memalign(&(s_node->segment_start), region->align, size) != 0)
-        return nomem_alloc;
-    memset(s_node->segment_start, 0, size); // initialising the segment with 0s
-    s_node -> num_words = size / (region->align);
-
-    s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
-    if(!(s_node->lock_bit))
-        return nomem_alloc;
-    memset(s_node->lock_bit, 0, (s_node->num_words) * sizeof(atomic_bool)); // lock bits initially set to 0
-    
-    s_node -> lock_version_number = (uint32_t*) malloc((s_node->num_words) * sizeof(uint32_t));
-    if(!(s_node->lock_version_number))
-        return nomem_alloc;
-    memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
 
     *target = s_node -> segment_start;
     // given an address, we have to do a linear search through the nodes of segments to find the right one

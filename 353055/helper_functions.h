@@ -4,6 +4,7 @@
 #include <stdbool.h>
 
 #include "data_structures.h"
+#include "macros.h"
 
 SegmentNode* getNode(MemoryRegion* region, void *segment_start){
     SegmentNode* cur_node = region -> alloced_segments;
@@ -16,7 +17,7 @@ SegmentNode* getNode(MemoryRegion* region, void *segment_start){
 }
 
 // A bit unsure about this implementation
-SegmentNode* nodeFromWordAddress(MemoryRegion* region, const char* address_search){
+SegmentNode* nodeFromWordAddress(MemoryRegion* region, char* address_search){
     SegmentNode* cur_node = region -> alloced_segments;
     while(cur_node != NULL){
         char* node_start = (char*)(cur_node->segment_start);
@@ -26,6 +27,7 @@ SegmentNode* nodeFromWordAddress(MemoryRegion* region, const char* address_searc
         }
         cur_node = cur_node -> next;
     }
+    assert(cur_node);
     return cur_node;
 }
 
@@ -103,4 +105,39 @@ void writeToLocations(LLNode* write_node, size_t align, size_t wv){
         atomic_store(&(segment->lock_bit[word]), 0); // not really needed
         cur = cur -> next;
     }
+}
+
+SegmentNode* init_node(MemoryRegion* region, size_t size){
+
+    SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
+    if(unlikely(!s_node))
+        return NULL;
+    
+
+    s_node -> prev = NULL;
+    // Since region is shared by all segments
+    pthread_mutex_lock(&(region->allocation_lock));
+    s_node -> next = region -> alloced_segments;
+    if(s_node -> next)
+        s_node -> next -> prev = s_node;
+    region -> alloced_segments = s_node;
+    pthread_mutex_unlock(&(region->allocation_lock));
+
+    s_node -> size = size;
+    if(posix_memalign(&(s_node->segment_start), region->align, size) != 0)
+        return NULL;
+    memset(s_node->segment_start, 0, size); // initialising the segment with 0s
+    s_node -> num_words = size / (region->align);
+
+    s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
+    if(!(s_node->lock_bit))
+        return NULL;
+    memset(s_node->lock_bit, 0, (s_node->num_words) * sizeof(atomic_bool)); // lock bits initially set to 0
+    
+    s_node -> lock_version_number = (uint32_t*) malloc((s_node->num_words) * sizeof(uint32_t));
+    if(!(s_node->lock_version_number))
+        return NULL;
+    memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
+
+    return s_node;
 }
