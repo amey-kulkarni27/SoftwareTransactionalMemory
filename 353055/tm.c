@@ -142,8 +142,10 @@ bool tm_end(shared_t shared, tx_t tx) {
     MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*) tx;
 
-    if(t->is_ro)
+    if(t->is_ro){
+        cleanTransaction(t);
         return true;
+    }
     
     if(!(t->write_addresses))
         return false; // cannot have a write transaction without any write addresses
@@ -219,10 +221,10 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             // sample lock bit and version number
             uint32_t v_before = (req_node->lock_version_number)[cur_word];
             memcpy(target_bytes, source_bytes, region->align);
+            if(((req_node->lock_bit)[cur_word]) || ((req_node->lock_version_number)[cur_word] != v_before) || ((req_node->lock_version_number)[cur_word] > (t->rv)))
+                return false;
             source_bytes += region->align;
             target_bytes += region->align;
-            if((req_node->lock_bit)[cur_word] || (req_node->lock_version_number)[cur_word] != v_before || (req_node->lock_version_number)[cur_word] > (t->rv))
-                return false;
         }
     }
     else{
