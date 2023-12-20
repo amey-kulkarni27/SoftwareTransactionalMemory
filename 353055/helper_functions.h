@@ -41,6 +41,21 @@ LLNode* getWriteNode(void* source_address, LLNode* cur_node){
     return cur_node;
 }
 
+void releaseLocks(LLNode* write_node, LLNode* until){
+    // we release a prefix of locks up to until
+    // until can be NULL, which means we have to release all locks
+    LLNode* remove_node = write_node;
+    while(remove_node != until){
+        assert(remove_node);
+        size_t word = remove_node -> word_num;
+        SegmentNode* segment = remove_node -> corresponding_segment;
+        assert(segment);
+        assert(segment->lock_bit);
+        atomic_store(&(segment->lock_bit[word]), 0);
+        remove_node = remove_node -> next;
+    }
+}
+
 bool acquireLocks(LLNode* write_node){
     LLNode* cur = write_node;
     bool success = true;
@@ -55,13 +70,7 @@ bool acquireLocks(LLNode* write_node){
         cur = cur -> next;
     }
     if(!success){
-        LLNode* remove_node = write_node;
-        while(remove_node != cur){
-            size_t word = remove_node -> word_num;
-            SegmentNode* segment = remove_node -> corresponding_segment;
-            atomic_store(&(segment->lock_bit[word]), 0);
-            remove_node = remove_node -> next;
-        }
+        releaseLocks(write_node, cur);
     }
     return success;
 }

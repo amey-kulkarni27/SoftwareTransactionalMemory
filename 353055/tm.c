@@ -174,6 +174,8 @@ bool tm_end(shared_t shared, tx_t tx) {
         LLNode* read_node = t -> read_addresses;
         while(read_node){
             if(!validate(read_node, t->write_addresses, t->rv)){
+                // release locks
+                releaseLocks(write_node, NULL); // all locks have been acquired if we have reached the validate stage
                 cleanTransaction(t);
                 return false;
             }
