@@ -47,7 +47,7 @@ bool acquireLocks(LLNode* write_node){
     while(cur){
         SegmentNode* segment = cur -> corresponding_segment;
         size_t word = cur -> word_num;
-        atomic_bool expected = false;
+        bool expected = false;
         if(!atomic_compare_exchange_strong(&(segment->lock_bit[word]), &expected, true)){
             success = false;
             break;
@@ -84,14 +84,16 @@ void cleanTransaction(Transaction* t){
 
 bool validate(LLNode* read_node, LLNode* write_node, u_int32_t rv){
     SegmentNode* read_segment = read_node -> corresponding_segment;
+    assert(read_segment);
     size_t word = read_node -> word_num;
+    if((read_segment->lock_version_number)[word] > rv)
+        return false;
     if((read_segment->lock_bit)[word] == 1){
         // If hasn't been locked by the same transaction then false
         if(!getWriteNode(read_node->location, write_node))
             return false;
     }
-    if((read_segment->lock_version_number)[word] > rv)
-        return false;
+    
     return true;
 }
 
@@ -102,7 +104,7 @@ void writeToLocations(LLNode* write_node, size_t align, size_t wv){
         SegmentNode* segment = cur -> corresponding_segment;
         size_t word = cur -> word_num;
         segment->lock_version_number[word] = wv;
-        atomic_store(&(segment->lock_bit[word]), 0); // not really needed
+        atomic_store(&(segment->lock_bit[word]), 0); // not really needed to be done atomically
         cur = cur -> next;
     }
 }
