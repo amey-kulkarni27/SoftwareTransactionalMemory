@@ -8,7 +8,7 @@
 SegmentNode* getNode(MemoryRegion* region, void *segment_start){
     SegmentNode* cur_node = region -> alloced_segments;
     while(cur_node != NULL){
-        if(cur_node->shared_segment == segment_start)
+        if(cur_node->segment_start == segment_start)
             break;
         cur_node = cur_node -> next;
     }
@@ -19,7 +19,7 @@ SegmentNode* getNode(MemoryRegion* region, void *segment_start){
 SegmentNode* nodeFromWordAddress(MemoryRegion* region, const char* address_search){
     SegmentNode* cur_node = region -> alloced_segments;
     while(cur_node != NULL){
-        char* node_start = (char*)(cur_node->shared_segment);
+        char* node_start = (char*)(cur_node->segment_start);
         size_t difference = address_search - node_start;
         if((node_start <= address_search) && (difference < (cur_node->size))){
             break;

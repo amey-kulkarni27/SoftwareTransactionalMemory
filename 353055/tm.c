@@ -142,14 +142,21 @@ bool tm_end(shared_t shared, tx_t tx) {
     MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*) tx;
 
-    // Remove duplicates if required (current implementation duplicates are never added in the first place)
+    if(t->is_ro)
+        return true;
+    
+    if(!(t->write_addresses))
+        return false; // cannot have a write transaction without any write addresses
 
+    // Remove duplicates if required (current implementation duplicates are never added in the first place)
+    SegmentNode* req_node = t -> write_addresses -> corresponding_segment;
     // Acquire all the locks for the write set
     LLNode* write_node = t -> write_addresses;
     if(!acquireLocks(write_node)){
         cleanTransaction(t);
         return false;
     }
+
 
     // Increment and store global clock
     long wv = atomic_fetch_add(&(region->global_clock), 1);
@@ -203,7 +210,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     char* target_bytes = (char*)target;
 
     SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
-    size_t diff = source_bytes - (char *)(req_node->shared_segment);
+    size_t diff = source_bytes - (char *)(req_node->segment_start);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     if(t -> is_ro){
         for(size_t i = 0; i < num_words; i++){
@@ -248,6 +255,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             }
         }
     }
+
     return true;
 }
 
@@ -275,7 +283,8 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
 
     SegmentNode* req_node = nodeFromWordAddress(region, target_bytes);
 
-    size_t diff = target_bytes - (char *)(req_node->shared_segment);
+
+    size_t diff = target_bytes - (char *)(req_node->segment_start);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     for(size_t i = 0; i < num_words; i++){
         size_t cur_word = start_word + i;
@@ -331,9 +340,9 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
     pthread_mutex_unlock(&(region->allocation_lock));
 
     s_node -> size = size;
-    if(posix_memalign(&(s_node->shared_segment), region->align, size) != 0)
+    if(posix_memalign(&(s_node->segment_start), region->align, size) != 0)
         return nomem_alloc;
-    memset(s_node->shared_segment, 0, size); // initialising the segment with 0s
+    memset(s_node->segment_start, 0, size); // initialising the segment with 0s
     s_node -> num_words = size / (region->align);
 
     s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
@@ -346,7 +355,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
         return nomem_alloc;
     memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
 
-    *target = s_node -> shared_segment;
+    *target = s_node -> segment_start;
     // given an address, we have to do a linear search through the nodes of segments to find the right one
 
     return success_alloc;
@@ -384,7 +393,7 @@ bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     // free up the contents of the segment
     free(req_node->lock_version_number);
     free(req_node->lock_bit);
-    free(req_node->shared_segment);
+    free(req_node->segment_start);
     // free up the node itself
     free(req_node);
 
