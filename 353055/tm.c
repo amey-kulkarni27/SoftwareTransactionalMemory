@@ -33,6 +33,7 @@
 #include <tm.h>
 #include "data_structures.h"
 #include "helper_functions.h"
+#include "readers_writer.h"
 
 #include "macros.h"
 
@@ -53,12 +54,16 @@ shared_t tm_create(size_t size, size_t align) {
 
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
-    pthread_mutex_init(&(region->allocation_lock), NULL);
+
     SegmentNode* first_segment = initNode(region, size);
+    // initRWLock(&region->allocation_lock);
+    pthread_mutex_init(&(region->allocation_lock), NULL);
     region -> start_segment = first_segment -> segment_start;
     pthread_mutex_lock(&(region->allocation_lock));
+    // writeLock(&region->allocation_lock);
     region -> alloced_segments = first_segment;
     pthread_mutex_unlock(&(region->allocation_lock));
+    // writeUnlock(&region->allocation_lock);
 
     return (shared_t) region;
 }
@@ -70,9 +75,12 @@ void tm_destroy(shared_t shared) {
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
     pthread_mutex_lock(&(region->allocation_lock));
+    // writeLock(&region->allocation_lock);
     cleanSegments(region -> alloced_segments);
     pthread_mutex_unlock(&(region->allocation_lock));
+    // writeUnlock(&region->allocation_lock);
     pthread_mutex_destroy(&(region->allocation_lock));
+    // destroyRWLock(&region->allocation_lock);
     // assert(!(region->start_segment));
     // free((region->start_segment));
     free(region);
@@ -158,9 +166,11 @@ bool tm_end(shared_t shared, tx_t tx) {
     
     if(!(t->write_addresses)){
         pthread_mutex_lock(&(region->allocation_lock));
+        // writeLock(&region->allocation_lock);
         addSegments(region, t->temp_alloced); // add segments from the temp alloc list
         removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
         pthread_mutex_unlock(&(region->allocation_lock));
+        // writeUnlock(&region->allocation_lock);
         cleanTransaction(region, t);
         return true; // cannot have a write transaction without any write addresses
     }
@@ -205,9 +215,11 @@ bool tm_end(shared_t shared, tx_t tx) {
     writeToLocations(write_node, region->align, wv);
 
     pthread_mutex_lock(&(region->allocation_lock));
+    // writeLock(&region->allocation_lock);
     addSegments(region, t->temp_alloced); // add segments from the temp alloc list
     removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
     pthread_mutex_unlock(&(region->allocation_lock));
+    // writeUnlock(&region->allocation_lock);
 
     cleanTransaction(region, t);
 

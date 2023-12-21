@@ -9,6 +9,16 @@
 // This version number denotes the last timestamp at which the data was written to
 
 
+typedef struct RWLock
+{
+    pthread_mutex_t mutex;
+    pthread_cond_t read_cond;
+    pthread_cond_t write_cond;
+    int readers;
+    bool writing;
+}RWLock;
+
+
 typedef struct SegmentNode {
     struct SegmentNode* prev;
     struct SegmentNode* next;
@@ -24,6 +34,7 @@ typedef struct MemoryRegion{
 	atomic_long global_clock; // global clock for TL2
 	void* start_segment; // pointer to non-deallocable first segment
     struct SegmentNode* alloced_segments; // segments alloced, points to head
+    // RWLock allocation_lock; // since (de)allocations can happen concurrently
     pthread_mutex_t allocation_lock; // since (de)allocations can happen concurrently
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
