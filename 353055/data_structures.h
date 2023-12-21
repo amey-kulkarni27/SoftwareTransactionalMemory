@@ -17,7 +17,6 @@ typedef struct SegmentNode {
     uint32_t num_words;
     atomic_bool* lock_bit; // each word has a lock bit
     uint32_t* lock_version_number; // each word lock has a version number denoting the last timestamp when it was written to
-    bool dirty;
 } SegmentNode;
 
 

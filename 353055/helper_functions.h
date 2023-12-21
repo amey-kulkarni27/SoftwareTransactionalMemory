@@ -114,49 +114,6 @@ void cleanSegments(SegmentNode* node){
     }
 }
 
-// Remove segment from the linked list
-void freeSegment(MemoryRegion* region, SegmentNode* segment){
-    assert(segment);
-    if(segment == region->alloced_segments){
-        region->alloced_segments = segment->next;
-        if(segment->next)
-            segment->next->prev = NULL; // first node in the LL
-    }
-    else{
-        SegmentNode* prev = segment->prev;
-        if(segment->next){
-            prev->next = segment->next;
-            segment->next->prev = prev;
-        }
-        else
-            prev->next = NULL;
-    }
-
-    assert(segment->lock_version_number);
-    assert(segment->lock_bit);
-    assert(segment->segment_start);
-    // assert up the node itself
-
-    // free up the contents of the segment
-    free(segment->lock_version_number);
-    free(segment->lock_bit);
-    free(segment->segment_start);
-    // free up the node itself
-    free(segment);
-}
-
-void removeDirty(MemoryRegion* region){
-    pthread_mutex_lock(&(region->allocation_lock));
-    SegmentNode* cur_node = region -> alloced_segments;
-    while(cur_node != NULL){
-        SegmentNode* nxt = cur_node -> next;
-        if(cur_node->dirty)
-            freeSegment(region, cur_node);
-        cur_node = nxt;
-    }
-    pthread_mutex_unlock(&(region->allocation_lock));
-}
-
 void cleanTransaction(MemoryRegion* region, Transaction* t){
     cleanAddresses(t->read_addresses, false);
     cleanAddresses(t->write_addresses, true);
