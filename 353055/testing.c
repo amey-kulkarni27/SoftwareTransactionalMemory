@@ -33,7 +33,6 @@ void swapInsideTransaction(shared_t r, tx_t t, void* seg2, void* buffer, size_t 
     // printf("S1 %p\n", seg1);
     // printf("S2 %p\n", seg2);
     // printf("S3 %p\n", seg3);
-    
     // swapping through the read and write
     tm_read(r, t, (void*)((char*)(seg2) + 8*0), size, buf); // read 1
     tm_read(r, t, (void*)((char*)(seg2) + 8*1), size, (void*)((char*)(buf) + 8)); // read 2
@@ -74,18 +73,21 @@ void single_playground(){
     tm_alloc(r, t, 256, &seg3);
     putVals(r, t, seg2, buffer, 16);
     swapInsideTransaction(r, t, seg2, buffer, 8);
-    readVals(r, t, seg2, buffer, 16);
+    tm_read(r, t, seg2, 16, buffer);
     tm_free(r, t, seg3);
     tm_alloc(r, t, 32, &seg1);
     tm_end(r, t);
+    printf("Buffers: %ld %ld\n", buffer[0], buffer[1]);
+    MemoryRegion* region = (MemoryRegion*)r;
+    SegmentNode* cur = region -> alloced_segments;
     tx_t t2 = tm_begin(r, false);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
-    readVals(r, t2, seg2, buffer, 16);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
-    readVals(r, t2, seg2, buffer, 16);
+    swapInsideTransaction(r, t2, seg2, buffer, 8);
     tm_end(r, t2);
     tx_t t3 = tm_begin(r, true);
     tm_read(r, t3, seg2, 16, buffer);
+    tm_end(r, t3);
     printf("Buffers: %ld %ld\n", buffer[0], buffer[1]);
     free(buffer);
 
@@ -115,6 +117,7 @@ typedef struct ThreadArgs{
 void* addSub(void* args_){
     ThreadArgs* args = (ThreadArgs*)args_;
     long* buffer = (long*)malloc(2*sizeof(long));
+    
     
     // Loop 1 times
     for(int i = 0; i < 500; i++){
@@ -157,12 +160,12 @@ void* addSub(void* args_){
         for(int i = 0; i < 4; i++){
             long *lptr = (long*)((char*)(args->seg) + 8*i);
             // printf("%p holds %ld\n", lptr, *lptr);
-            printf("%ld ", *lptr);
+            // printf("%ld ", *lptr);
             sum += (*lptr);
         }
-        printf("\n\n");
+        // printf("\n\n");
         SegmentNode* sg = nodeFromWordAddress2((MemoryRegion*)(args->r), (char*)(args->seg));
-        printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
+        // printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
         if(sum != 0){
             printf("%d %d\n", num1, num2);
             for(int i = 0; i < 4; i++){
@@ -192,9 +195,14 @@ void two_threads(){
     shared_t r = tm_create(64, 8);
     tx_t t = tm_begin(r, false);
     void* seg1; // segment start
-    tm_alloc(r, t, 32, &seg1); // 4 words
-    printf("Segment start loc %p\n", seg1);
-    tm_end(r, t);
+    printf("Done %d\n", tm_alloc(r, t, 32, &seg1));
+    printf("Done %d\n", tm_end(r, t));
+    MemoryRegion* region = (MemoryRegion*)r;
+    SegmentNode* cur = (SegmentNode*)(region->alloced_segments);
+    while(cur){
+        printf("%p\n", cur->segment_start);
+        cur = cur->next;
+    }
     // Create the two threads
     pthread_t thread1, thread2;
     ThreadArgs ta1 = {r, seg1, 1};

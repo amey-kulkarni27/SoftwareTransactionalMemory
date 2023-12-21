@@ -28,7 +28,6 @@ typedef struct MemoryRegion{
     pthread_mutex_t allocation_lock; // since (de)allocations can happen concurrently
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
     size_t align;       // Size of a word in the shared memory region (in bytes)
-    unsigned long transactions_complete;
 }MemoryRegion;
 
 typedef struct LLNode{
@@ -51,4 +50,6 @@ typedef struct Transaction
     // write set
     uint32_t num_writes; // size of write LL
     LLNode* write_addresses; // head of write-set addresses (nodes contain value as well)
+    struct SegmentNode* temp_alloced; // Linked list of alloced segments in current transaction
+    LLNode* to_erase; // segment start addresses of the segments to be erased
 }Transaction;
