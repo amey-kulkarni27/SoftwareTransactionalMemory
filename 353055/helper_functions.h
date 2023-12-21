@@ -13,6 +13,7 @@ SegmentNode* getNode(MemoryRegion* region, void *segment_start){
             break;
         cur_node = cur_node -> next;
     }
+    // assert(cur_node);
     return cur_node;
 }
 
@@ -27,7 +28,7 @@ SegmentNode* nodeFromWordAddress(MemoryRegion* region, char* address_search){
         }
         cur_node = cur_node -> next;
     }
-    assert(cur_node);
+
     return cur_node;
 }
 
@@ -85,9 +86,54 @@ void cleanAddresses(LLNode* node){
     }
 }
 
-void cleanTransaction(Transaction* t){
+void freeSegment(MemoryRegion* region, SegmentNode* segment){
+    if(segment == region->alloced_segments){
+        region->alloced_segments = segment->next;
+        if(segment->next)
+            segment->next->prev = NULL; // first node in the LL
+    }
+    else{
+        SegmentNode* prev = segment->prev;
+        if(segment->next){
+            prev->next = segment->next;
+            segment->next->prev = prev;
+        }
+        else
+            prev->next = NULL;
+    }
+
+    assert(segment->lock_version_number);
+    assert(segment->lock_bit);
+    assert(segment->segment_start);
+    // assert up the node itself
+
+    // free up the contents of the segment
+    free(segment->lock_version_number);
+    free(segment->lock_bit);
+    free(segment->segment_start);
+    // free up the node itself
+    free(segment);
+}
+
+void removeDirty(MemoryRegion* region){
+    pthread_mutex_lock(&(region->allocation_lock));
+    SegmentNode* cur_node = region -> alloced_segments;
+    while(cur_node != NULL){
+        SegmentNode* nxt = cur_node -> next;
+        if(cur_node->dirty)
+            freeSegment(region, cur_node);
+        cur_node = nxt;
+    }
+    pthread_mutex_unlock(&(region->allocation_lock));
+}
+
+void cleanTransaction(MemoryRegion* region, Transaction* t, bool success){
     cleanAddresses(t->read_addresses);
     cleanAddresses(t->write_addresses);
+    if(success){
+        if((region -> transactions_complete++) % 100)
+            removeDirty(region); // periodic cleaning
+    }
     free(t);
 }
 
@@ -118,7 +164,7 @@ void writeToLocations(LLNode* write_node, size_t align, size_t wv){
     }
 }
 
-SegmentNode* init_node(MemoryRegion* region, size_t size){
+SegmentNode* initNode(MemoryRegion* region, size_t size){
 
     SegmentNode* s_node = (SegmentNode*) malloc(sizeof(SegmentNode));
     if(unlikely(!s_node))
@@ -132,12 +178,12 @@ SegmentNode* init_node(MemoryRegion* region, size_t size){
     if(s_node -> next)
         s_node -> next -> prev = s_node;
     region -> alloced_segments = s_node;
-    pthread_mutex_unlock(&(region->allocation_lock));
 
     s_node -> size = size;
     if(posix_memalign(&(s_node->segment_start), region->align, size) != 0)
         return NULL;
     memset(s_node->segment_start, 0, size); // initialising the segment with 0s
+    // printf("Node Start Address: %p, size: %zu\n", s_node->segment_start, size);
     s_node -> num_words = size / (region->align);
 
     s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
@@ -149,6 +195,9 @@ SegmentNode* init_node(MemoryRegion* region, size_t size){
     if(!(s_node->lock_version_number))
         return NULL;
     memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
+    s_node -> dirty = false;
+    pthread_mutex_unlock(&(region->allocation_lock));
 
     return s_node;
 }
+

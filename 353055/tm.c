@@ -53,10 +53,13 @@ shared_t tm_create(size_t size, size_t align) {
 
     // We allocate the shared memory buffer such that its words are correctly
     // aligned.
-    SegmentNode* first_segment = init_node(region, size);
-    region -> start_segment = first_segment -> segment_start;
-    region -> alloced_segments = first_segment;
     pthread_mutex_init(&(region->allocation_lock), NULL);
+    SegmentNode* first_segment = initNode(region, size);
+    region -> start_segment = first_segment -> segment_start;
+    pthread_mutex_lock(&(region->allocation_lock));
+    region -> alloced_segments = first_segment;
+    pthread_mutex_unlock(&(region->allocation_lock));
+    region->transactions_complete = 0; // this will be used to regularly remove dirty segments
 
     return (shared_t) region;
 }
@@ -138,12 +141,11 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
 bool tm_end(shared_t shared, tx_t tx) {
     // printf("End\n");
     // TODO: tm_end(shared_t, tx_t)
-
     MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*) tx;
 
     if(t->is_ro){
-        cleanTransaction(t);
+        cleanTransaction(region, t, true);
         return true;
     }
     
@@ -157,7 +159,7 @@ bool tm_end(shared_t shared, tx_t tx) {
     LLNode* write_node = t -> write_addresses;
     assert(write_node);
     if(!acquireLocks(write_node)){
-        cleanTransaction(t);
+        cleanTransaction(region, t, false);
         return false;
     }
 
@@ -176,7 +178,7 @@ bool tm_end(shared_t shared, tx_t tx) {
             if(!validate(read_node, t->write_addresses, t->rv)){
                 // release locks
                 releaseLocks(write_node, NULL); // all locks have been acquired if we have reached the validate stage
-                cleanTransaction(t);
+                cleanTransaction(region, t, false);
                 return false;
             }
             read_node = read_node -> next;
@@ -189,7 +191,7 @@ bool tm_end(shared_t shared, tx_t tx) {
     // Clear the lock bit
     writeToLocations(write_node, region->align, wv);
 
-    cleanTransaction(t);
+    cleanTransaction(region, t, false);
 
     return true;
 }
@@ -212,11 +214,18 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     // Convert to char* pointers, so that the difference of the pointers represents the bytes in between
     char* source_bytes = (char*)source;
     char* target_bytes = (char*)target;
+    assert(source == source_bytes);
 
     SegmentNode* req_node = nodeFromWordAddress(region, source_bytes);
+    // if(!req_node)
+    //     printf("Source Address: %p, added: %p\n", source_bytes, source_bytes+2072);
+    if(!req_node)
+        return false;
     assert(req_node);
     size_t diff = source_bytes - (char *)(req_node->segment_start);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
+    assert(req_node->lock_version_number);
+    assert(req_node->lock_bit);
     if(t -> is_ro){
         for(size_t i = 0; i < num_words; i++){
             size_t cur_word = start_word + i;
@@ -336,12 +345,13 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 
     MemoryRegion* region = (MemoryRegion*) shared;
 
-    SegmentNode* s_node = init_node(region, size);
+    SegmentNode* s_node = initNode(region, size);
     if(!s_node)
         return nomem_alloc;
 
     *target = s_node -> segment_start;
     // given an address, we have to do a linear search through the nodes of segments to find the right one
+    printf("To allocate %p\n", s_node->segment_start);
 
     return success_alloc;
 }
@@ -354,34 +364,14 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 **/
 bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     // TODO: tm_free(shared_t, tx_t, void*)
+    printf("To deallocate %p\n", target);
 
     MemoryRegion* region = (MemoryRegion*) shared;
 
-    pthread_mutex_lock(&(region->allocation_lock));
     SegmentNode* req_node = getNode(region, target);
-    if(req_node == region->alloced_segments){
-        region->alloced_segments = req_node->next;
-        if(req_node->next)
-            req_node->next->prev = NULL; // first node in the LL
-    }
-    else{
-        SegmentNode* prev = req_node->prev;
-        if(req_node->next){
-            prev->next = req_node->next;
-            req_node->next->prev = prev;
-        }
-        else
-            prev->next = NULL;
-    }
-    pthread_mutex_unlock(&(region->allocation_lock));
-
-    // free up the contents of the segment
-    free(req_node->lock_version_number);
-    free(req_node->lock_bit);
-    free(req_node->segment_start);
-    // free up the node itself
-    free(req_node);
-
+    assert(req_node);
+    req_node->dirty = true;
+    // printf("Deallocated %p\n", target);
 
     return true;
 }
