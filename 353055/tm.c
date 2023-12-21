@@ -395,11 +395,10 @@ alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
  * @param target Address of the first byte of the previously allocated segment to deallocate
  * @return Whether the whole transaction can continue
 **/
-bool tm_free(shared_t shared, tx_t tx, void* target) {
+bool tm_free(shared_t unused(shared), tx_t tx, void* target) {
     // TODO: tm_free(shared_t, tx_t, void*)
     // printf("To deallocate %p\n", target);
 
-    MemoryRegion* region = (MemoryRegion*) shared;
     Transaction* t = (Transaction*) tx;
     LLNode* free_node = (LLNode*) malloc(sizeof(LLNode));
     assert(free_node);
