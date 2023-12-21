@@ -92,6 +92,20 @@ void single_playground(){
     tm_destroy(r);
 }
 
+SegmentNode* nodeFromWordAddress2(MemoryRegion* region, char* address_search){
+    SegmentNode* cur_node = region -> alloced_segments;
+    while(cur_node != NULL){
+        char* node_start = (char*)(cur_node->segment_start);
+        size_t difference = address_search - node_start;
+        if((node_start <= address_search) && (difference < (cur_node->size))){
+            break;
+        }
+        cur_node = cur_node -> next;
+    }
+    assert(cur_node);
+    return cur_node;
+}
+
 typedef struct ThreadArgs{
     shared_t r;
     void* seg;
@@ -103,16 +117,14 @@ void* addSub(void* args_){
     long* buffer = (long*)malloc(2*sizeof(long));
     
     // Loop 1 times
-    for(int i = 0; i < 50; i++){
+    for(int i = 0; i < 500; i++){
         // pick two indices out of the four
         tx_t t = tm_begin(args->r, false);
         srand((unsigned int)(time(NULL)+args->id) + i);
         int num1 = rand() % 4;
-        int num2 = rand() % 4;
-        if(num1 == num2){
-            i--;
-            continue;
-        }
+        int num2 = rand() % 3;
+        num2 += num1 + 1;
+        num2 %= 4;
         // printf("Thread %d: %d %d\n", args->id, num1, num2);
         int a1 = tm_read(args->r, t, (void*)((char*)(args->seg) + 8*num1), 8, buffer); // read 1
         if(!a1)
@@ -149,6 +161,8 @@ void* addSub(void* args_){
             sum += (*lptr);
         }
         printf("\n\n");
+        SegmentNode* sg = nodeFromWordAddress2((MemoryRegion*)(args->r), (char*)(args->seg));
+        printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
         if(sum != 0){
             printf("%d %d\n", num1, num2);
             for(int i = 0; i < 4; i++){
@@ -172,19 +186,7 @@ void* addSub(void* args_){
     return NULL;
 }
 
-SegmentNode* nodeFromWordAddress2(MemoryRegion* region, char* address_search){
-    SegmentNode* cur_node = region -> alloced_segments;
-    while(cur_node != NULL){
-        char* node_start = (char*)(cur_node->segment_start);
-        size_t difference = address_search - node_start;
-        if((node_start <= address_search) && (difference < (cur_node->size))){
-            break;
-        }
-        cur_node = cur_node -> next;
-    }
-    assert(cur_node);
-    return cur_node;
-}
+
 
 void two_threads(){
     shared_t r = tm_create(64, 8);

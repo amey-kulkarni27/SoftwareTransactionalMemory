@@ -7,18 +7,21 @@
 #include "macros.h"
 
 SegmentNode* getNode(MemoryRegion* region, void *segment_start){
+    pthread_mutex_lock(&(region->allocation_lock));
     SegmentNode* cur_node = region -> alloced_segments;
     while(cur_node != NULL){
         if(cur_node->segment_start == segment_start)
             break;
         cur_node = cur_node -> next;
     }
+    pthread_mutex_unlock(&(region->allocation_lock));
     // assert(cur_node);
     return cur_node;
 }
 
 // A bit unsure about this implementation
 SegmentNode* nodeFromWordAddress(MemoryRegion* region, char* address_search){
+    pthread_mutex_lock(&(region->allocation_lock));
     SegmentNode* cur_node = region -> alloced_segments;
     while(cur_node != NULL){
         char* node_start = (char*)(cur_node->segment_start);
@@ -28,6 +31,7 @@ SegmentNode* nodeFromWordAddress(MemoryRegion* region, char* address_search){
         }
         cur_node = cur_node -> next;
     }
+    pthread_mutex_unlock(&(region->allocation_lock));
 
     return cur_node;
 }
@@ -87,6 +91,7 @@ void cleanAddresses(LLNode* node){
 }
 
 void freeSegment(MemoryRegion* region, SegmentNode* segment){
+    assert(segment);
     if(segment == region->alloced_segments){
         region->alloced_segments = segment->next;
         if(segment->next)
@@ -131,7 +136,7 @@ void cleanTransaction(MemoryRegion* region, Transaction* t, bool success){
     cleanAddresses(t->read_addresses);
     cleanAddresses(t->write_addresses);
     if(success){
-        if((region -> transactions_complete++) % 100)
+        if((region -> transactions_complete++) % 1000)
             removeDirty(region); // periodic cleaning
     }
     free(t);

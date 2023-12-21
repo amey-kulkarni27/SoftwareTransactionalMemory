@@ -70,11 +70,13 @@ shared_t tm_create(size_t size, size_t align) {
 void tm_destroy(shared_t shared) {
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
+    pthread_mutex_lock(&(region->allocation_lock));
     while(region -> alloced_segments){
         SegmentNode *nxt = region -> alloced_segments -> next;
         free(region -> alloced_segments);
         region -> alloced_segments = nxt;
     }
+    pthread_mutex_unlock(&(region->allocation_lock));
     pthread_mutex_destroy(&(region->allocation_lock));
     free(region);
 }
@@ -351,7 +353,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 
     *target = s_node -> segment_start;
     // given an address, we have to do a linear search through the nodes of segments to find the right one
-    printf("To allocate %p\n", s_node->segment_start);
+    // printf("To allocate %p\n", s_node->segment_start);
 
     return success_alloc;
 }
@@ -364,7 +366,7 @@ alloc_t tm_alloc(shared_t shared, tx_t unused(tx), size_t size, void** target) {
 **/
 bool tm_free(shared_t shared, tx_t unused(tx), void* target) {
     // TODO: tm_free(shared_t, tx_t, void*)
-    printf("To deallocate %p\n", target);
+    // printf("To deallocate %p\n", target);
 
     MemoryRegion* region = (MemoryRegion*) shared;
 
