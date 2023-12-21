@@ -120,7 +120,7 @@ void* addSub(void* args_){
     
     
     // Loop 1 times
-    for(int i = 0; i < 500; i++){
+    for(int i = 0; i < 500000; i++){
         // pick two indices out of the four
         tx_t t = tm_begin(args->r, false);
         srand((unsigned int)(time(NULL)+args->id) + i);
@@ -130,11 +130,15 @@ void* addSub(void* args_){
         num2 %= 4;
         // printf("Thread %d: %d %d\n", args->id, num1, num2);
         int a1 = tm_read(args->r, t, (void*)((char*)(args->seg) + 8*num1), 8, buffer); // read 1
-        if(!a1)
+        if(!a1){
+            // printf("Failed\n");
             continue;
+        }
         int a2 = tm_read(args->r, t, (void*)((char*)(args->seg) + 8*num2), 8, &buffer[1]); // read 2
-        if(!a2)
+        if(!a2){
+            // printf("Failed\n");
             continue;
+        }
         int first_first = rand() % 2; // pick whether to add at first or second index, subtract at the other
         if(first_first){
             buffer[0]++;
@@ -146,36 +150,41 @@ void* addSub(void* args_){
         }
         // printf("B1: %ld B2: %ld\n", buffer[0], buffer[1]);
         int a3 = tm_write(args->r, t, buffer, 8, (void*)((char*)(args->seg) + 8*num1));
-        if(!a3)
+        if(!a3){
+            printf("Failed\n");
             continue;
+        }
         int a4 = tm_write(args->r, t, &buffer[1], 8, (void*)((char*)(args->seg) + 8*num2)); // read 2
         if(!a4)
             continue;
-        // printf("Bool vals %d %d %d %d\n", a1, a2, a3, a4);
         int x = tm_end(args->r, t);
         if(!x)
             continue;
-        printf("Thread: %d, Num: %d\n", args->id, i+1);
+        // printf("Thread: %d, Num: %d\n", args->id, i+1);
         long sum = 0;
-        for(int i = 0; i < 4; i++){
-            long *lptr = (long*)((char*)(args->seg) + 8*i);
-            // printf("%p holds %ld\n", lptr, *lptr);
-            // printf("%ld ", *lptr);
-            sum += (*lptr);
-        }
+        // Can't calculate the sum here since the other thread may be running
+        // for(int i = 0; i < 4; i++){
+        //     long *lptr = (long*)((char*)(args->seg) + 8*i);
+        //     // printf("%p holds %ld\n", lptr, *lptr);
+        //     printf("%ld ", *lptr);
+        //     sum += (*lptr);
+        // }
         // printf("\n\n");
-        SegmentNode* sg = nodeFromWordAddress2((MemoryRegion*)(args->r), (char*)(args->seg));
-        // printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
-        if(sum != 0){
-            printf("%d %d\n", num1, num2);
-            for(int i = 0; i < 4; i++){
-                long *lptr = (long*)((char*)(args->seg) + 8*i);
-                // printf("%p holds %ld\n", lptr, *lptr);
-                printf("%ld ", *lptr);
-                sum += (*lptr);
-            }
-        }
-        assert(sum == 0);
+        // SegmentNode* sg = nodeFromWordAddress2((MemoryRegion*)(args->r), (char*)(args->seg));
+        // // printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
+        // if(sum != 0){
+        //     printf("%d %d\n", num1, num2);
+        //     printf("%ld %ld\n", buffer[0], buffer[1]);
+        //     printf("Lock status %d %d %d %d\n", sg->lock_bit[0], sg->lock_bit[1], sg->lock_bit[2], sg->lock_bit[3]);
+        //     for(int i = 0; i < 4; i++){
+        //         long *lptr = (long*)((char*)(args->seg) + 8*i);
+        //         // printf("%p holds %ld\n", lptr, *lptr);
+        //         printf("%ld ", *lptr);
+        //         sum += (*lptr);
+        //     }
+        //     printf("\nSum %ld\n", sum);
+        // }
+        // assert(sum == 0);
     }
     // printf("Is thread %d a success? %d\n", args->id, tm_end(args->r, t));
     // Read values from the segment
@@ -199,10 +208,6 @@ void two_threads(){
     printf("Done %d\n", tm_end(r, t));
     MemoryRegion* region = (MemoryRegion*)r;
     SegmentNode* cur = (SegmentNode*)(region->alloced_segments);
-    while(cur){
-        printf("%p\n", cur->segment_start);
-        cur = cur->next;
-    }
     // Create the two threads
     pthread_t thread1, thread2;
     ThreadArgs ta1 = {r, seg1, 1};
@@ -236,7 +241,7 @@ void two_threads(){
     printf("\n");
     free(buffer);
     printf("Sum %ld\n", sum);
-    // assert(sum == 0);
+    assert(sum == 0);
 
     tm_destroy(r);
 }
