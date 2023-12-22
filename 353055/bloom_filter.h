@@ -29,14 +29,14 @@ uint32_t hashFunction(const char* element, size_t seed) {
 }
 
 void addToBloomFilter(BloomFilter* filter, const char* element) {
-    for (size_t i = 0; i < filter->num_hashes; ++i) {
+    for (int i = 0; i < filter->num_hashes; ++i) {
         uint32_t hash = hashFunction(element, i) % filter->size;
         filter->bit_array[hash / 8] |= (1 << (hash % 8));
     }
 }
 
 bool isInBloomFilter(const BloomFilter* filter, const char* element) {
-    for (size_t i = 0; i < filter->num_hashes; ++i) {
+    for (int i = 0; i < filter->num_hashes; ++i) {
         uint32_t hash = hashFunction(element, i) % filter->size;
         if ((filter->bit_array[hash / 8] & (1 << (hash % 8))) == 0) {
             return false; // One of the bits is not set
