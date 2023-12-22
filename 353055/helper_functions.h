@@ -70,7 +70,7 @@ void cleanAddresses(LLNode* node, bool is_write){
 }
 
 void cleanSegments(MemoryRegion* region){
-    for(size_t i = 0; i < region->max_size; i++){
+    for(size_t i = 1; i < region->max_size; i++){
         if(region->segments_list[i])
             free(region->segments_list[i]);
     }
