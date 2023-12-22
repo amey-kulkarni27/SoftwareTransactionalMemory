@@ -74,7 +74,7 @@ shared_t tm_create(size_t size, size_t align) {
  * @param shared Shared memory region to destroy, with no running transaction
 **/
 void tm_destroy(shared_t shared) {
-    // printf("Destroy\n");
+    printf("Destroy\n");
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
     cleanSegments(region);
