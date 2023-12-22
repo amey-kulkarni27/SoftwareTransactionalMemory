@@ -5,6 +5,7 @@
 
 #include "data_structures.h"
 #include "readers_writer.h"
+#include "bloom_filter.h"
 #include "macros.h"
 
 // A bit unsure about this implementation
@@ -71,8 +72,15 @@ void cleanAddresses(LLNode* node, bool is_write){
 
 void cleanSegments(MemoryRegion* region){
     for(size_t i = 1; i < region->max_size; i++){
-        if(region->segments_list[i])
+        if(region->segments_list[i]){
+            if(region->segments_list[i]->lock_bit)
+                free(region->segments_list[i]->lock_bit);
+            if(region->segments_list[i]->lock_version_number)
+                free(region->segments_list[i]->lock_version_number);
+            if(region->segments_list[i]->segment_start)
+                free(region->segments_list[i]->segment_start);
             free(region->segments_list[i]);
+        }
     }
     free(region->segments_list);
 }
@@ -80,6 +88,7 @@ void cleanSegments(MemoryRegion* region){
 void cleanTransaction(Transaction* t){
     cleanAddresses(t->read_addresses, false);
     cleanAddresses(t->write_addresses, true);
+    freeBloomFilter(t->filter);
     free(t);
 }
 
@@ -121,22 +130,29 @@ SegmentNode* initNode(MemoryRegion* region, size_t size){
     s_node -> next = NULL;
 
     s_node -> size = size;
-    if(posix_memalign(&(s_node->segment_start), region->align, size) != 0)
+    if(unlikely(posix_memalign(&(s_node->segment_start), region->align, size) != 0)){
+        free(s_node);
         return NULL;
+    }
     memset(s_node->segment_start, 0, size); // initialising the segment with 0s
     // printf("Node Start Address: %p, size: %zu\n", s_node->segment_start, size);
     s_node -> num_words = size / (region->align);
 
     s_node -> lock_bit = (atomic_bool*) malloc((s_node->num_words) * sizeof(atomic_bool));
-    assert(s_node->lock_bit);
-    if(!(s_node->lock_bit))
+    if(unlikely(!(s_node->lock_bit))){
+        free(s_node);
+        free(s_node->segment_start);
         return NULL;
+    }
     memset(s_node->lock_bit, 0, (s_node->num_words) * sizeof(atomic_bool)); // lock bits initially set to 0
     
     s_node -> lock_version_number = (uint32_t*) malloc((s_node->num_words) * sizeof(uint32_t));
-    assert(s_node->lock_version_number);
-    if(!(s_node->lock_version_number))
+    if(unlikely(!(s_node->lock_version_number))){
+        free(s_node);
+        free(s_node->segment_start);
+        free(s_node->lock_bit);
         return NULL;
+    }
     memset(s_node->lock_version_number, 0, (s_node->num_words) * sizeof(uint32_t)); // version is initially set to 0
 
     return s_node;

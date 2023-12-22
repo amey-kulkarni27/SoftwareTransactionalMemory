@@ -63,6 +63,10 @@ shared_t tm_create(size_t size, size_t align) {
     // initRWLock(&region->allocation_lock);
     pthread_mutex_init(&(region->allocation_lock), NULL);
     region -> segments_list = (SegmentNode**)malloc(region->max_size * sizeof(SegmentNode*));
+    if(unlikely(!(region->segments_list))){
+        free(region);
+        return invalid_shared;
+    }
     region -> segments_list[region->num_allocs] = first_segment;
     region -> num_allocs++;
     region -> start_segment = first_segment -> segment_start;
@@ -74,7 +78,7 @@ shared_t tm_create(size_t size, size_t align) {
  * @param shared Shared memory region to destroy, with no running transaction
 **/
 void tm_destroy(shared_t shared) {
-    printf("Destroy\n");
+    // printf("Destroy\n");
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
     cleanSegments(region);
@@ -278,7 +282,10 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             }
             // Create a new node for reading the value
             LLNode* newReadNode = (LLNode*) malloc(sizeof(LLNode));
-            assert(newReadNode);
+            if(unlikely(!newReadNode)){
+                cleanTransaction(t);
+                return false;
+            }
             newReadNode -> word_num = cur_word;
             newReadNode -> location = source_bytes;
             newReadNode -> corresponding_segment = req_node;
@@ -333,11 +340,18 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
         if(!seen){
             // Create a new node for writing the value
             LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
-            assert(newWriteNode);
+            if(unlikely(!newWriteNode)){
+                cleanTransaction(t);
+                return false;
+            }
             newWriteNode -> word_num = cur_word;
             newWriteNode -> location = target_bytes;
             void* buffer = (void*) malloc(sizeof(region->align));
-            assert(buffer);
+            if(unlikely(!buffer)){
+                free(newWriteNode);
+                cleanTransaction(t);
+                return false;
+            }
             memcpy(buffer, source_bytes, region->align);
             newWriteNode -> value = buffer; // storing the value in this buffer
             newWriteNode -> corresponding_segment = req_node;
@@ -353,11 +367,18 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
             else{
                 // Create a new node for writing the value
                 LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
-                assert(newWriteNode);
+                if(unlikely(!newWriteNode)){
+                    cleanTransaction(t);
+                    return false;
+                }
                 newWriteNode -> word_num = cur_word;
                 newWriteNode -> location = target_bytes;
                 void* buffer = (void*) malloc(sizeof(region->align));
-                assert(buffer);
+                if(unlikely(!buffer)){
+                    free(newWriteNode);
+                    cleanTransaction(t);
+                    return false;
+                }
                 memcpy(buffer, source_bytes, region->align);
                 newWriteNode -> value = buffer; // storing the value in this buffer
                 newWriteNode -> corresponding_segment = req_node;

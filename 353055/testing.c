@@ -21,7 +21,7 @@ void putVals(shared_t r, tx_t t, void* seg2, void* buffer, size_t size){
 
 void readVals(shared_t r, tx_t t, void* seg2, void* buffer, size_t size){
     tm_read(r, t, seg2, size, buffer);
-    for(int i = 0; i < size / 8; i++){
+    for(size_t i = 0; i < size / 8; i++){
         printf("%ld ", ((long*)(buffer))[i]);
     }
     printf("\n");
@@ -79,7 +79,6 @@ void single_playground(){
     tm_alloc(r, t, 32, &seg1);
     tm_end(r, t);
     printf("Buffers: %ld %ld\n", buffer[0], buffer[1]);
-    MemoryRegion* region = (MemoryRegion*)r;
     tx_t t2 = tm_begin(r, false);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
@@ -161,7 +160,7 @@ void* addSub(void* args_){
         if(!x)
             continue;
         // printf("Thread: %d, Num: %d\n", args->id, i+1);
-        long sum = 0;
+        // long sum = 0;
         // Can't calculate the sum here since the other thread may be running
         // for(int i = 0; i < 4; i++){
         //     long *lptr = (long*)((char*)(args->seg) + 8*i);
