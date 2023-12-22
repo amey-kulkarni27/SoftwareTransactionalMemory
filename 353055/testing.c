@@ -69,8 +69,9 @@ void single_playground(){
     void* seg2;
     void* seg3;
     tx_t t = tm_begin(r, false);
-    tm_alloc(r, t, 16, &seg2);
     tm_alloc(r, t, 256, &seg3);
+    tm_alloc(r, t, 16, &seg2);
+    tm_write(r, t, buffer, 8, seg2);
     putVals(r, t, seg2, buffer, 16);
     swapInsideTransaction(r, t, seg2, buffer, 8);
     tm_read(r, t, seg2, 16, buffer);
@@ -79,7 +80,6 @@ void single_playground(){
     tm_end(r, t);
     printf("Buffers: %ld %ld\n", buffer[0], buffer[1]);
     MemoryRegion* region = (MemoryRegion*)r;
-    SegmentNode* cur = region -> alloced_segments;
     tx_t t2 = tm_begin(r, false);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
     swapInsideTransaction(r, t2, seg2, buffer, 8);
@@ -94,19 +94,19 @@ void single_playground(){
     tm_destroy(r);
 }
 
-SegmentNode* nodeFromWordAddress2(MemoryRegion* region, char* address_search){
-    SegmentNode* cur_node = region -> alloced_segments;
-    while(cur_node != NULL){
-        char* node_start = (char*)(cur_node->segment_start);
-        size_t difference = address_search - node_start;
-        if((node_start <= address_search) && (difference < (cur_node->size))){
-            break;
-        }
-        cur_node = cur_node -> next;
-    }
-    assert(cur_node);
-    return cur_node;
-}
+// SegmentNode* nodeFromWordAddress2(MemoryRegion* region, char* address_search){
+//     SegmentNode* cur_node = region -> alloced_segments;
+//     while(cur_node != NULL){
+//         char* node_start = (char*)(cur_node->segment_start);
+//         size_t difference = address_search - node_start;
+//         if((node_start <= address_search) && (difference < (cur_node->size))){
+//             break;
+//         }
+//         cur_node = cur_node -> next;
+//     }
+//     assert(cur_node);
+//     return cur_node;
+// }
 
 typedef struct ThreadArgs{
     shared_t r;
@@ -207,7 +207,6 @@ void two_threads(){
     printf("Done %d\n", tm_alloc(r, t, 32, &seg1));
     printf("Done %d\n", tm_end(r, t));
     MemoryRegion* region = (MemoryRegion*)r;
-    SegmentNode* cur = (SegmentNode*)(region->alloced_segments);
     // Create the two threads
     pthread_t thread1, thread2;
     ThreadArgs ta1 = {r, seg1, 1};
@@ -217,11 +216,12 @@ void two_threads(){
 
     pthread_join(thread1, NULL);
     pthread_join(thread2, NULL);
+    printf("Hello\n");
 
     tx_t tr = tm_begin(r, true);
     long* buffer = (long*)malloc(4*sizeof(long));
-    SegmentNode* seg = nodeFromWordAddress2((MemoryRegion*)r, (char*)seg1);
-    printf("Lock status %d %d %d %d\n", seg->lock_bit[0], seg->lock_bit[1], seg->lock_bit[2], seg->lock_bit[3]);
+    // SegmentNode* seg = nodeFromWordAddress2((MemoryRegion*)r, (char*)seg1);
+    // printf("Lock status %d %d %d %d\n", seg->lock_bit[0], seg->lock_bit[1], seg->lock_bit[2], seg->lock_bit[3]);
     int y = tm_read(r, tr, seg1, 32, buffer);
     printf("Read %d\n", y);
     int x = tm_end(r, tr);
@@ -232,8 +232,9 @@ void two_threads(){
         printf("%ld ", buffer[i]);
     }
     printf("\n");
+    SegmentNode* s = region->segments_list[2];
     for(int i = 0; i < 4; i++){
-        long *lptr = (long*)((char*)(seg1) + 8*i);
+        long *lptr = (long*)((char*)(s->segment_start) + 8*i);
         // printf("%p holds %ld\n", lptr, *lptr);
         printf("%ld ", *lptr);
         sum += (*lptr);

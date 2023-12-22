@@ -9,6 +9,14 @@
 // This version number denotes the last timestamp at which the data was written to
 
 
+typedef struct BloomFilter
+{
+    size_t size;
+    int num_hashes;
+    uint8_t* bit_array;
+}BloomFilter;
+
+
 typedef struct RWLock
 {
     pthread_mutex_t mutex;
@@ -33,7 +41,10 @@ typedef struct SegmentNode {
 typedef struct MemoryRegion{
 	atomic_long global_clock; // global clock for TL2
 	void* start_segment; // pointer to non-deallocable first segment
-    struct SegmentNode* alloced_segments; // segments alloced, points to head
+    // struct SegmentNode* alloced_segments; // segments alloced, points to head
+    struct SegmentNode** segments_list; // at the ith position, ith alloced segment
+    size_t num_allocs; // use this for the naming convention
+    size_t max_size;
     // RWLock allocation_lock; // since (de)allocations can happen concurrently
     pthread_mutex_t allocation_lock; // since (de)allocations can happen concurrently
     size_t size;        // Size of the non-deallocable memory segment (in bytes)
@@ -60,6 +71,7 @@ typedef struct Transaction
     // write set
     uint32_t num_writes; // size of write LL
     LLNode* write_addresses; // head of write-set addresses (nodes contain value as well)
-    struct SegmentNode* temp_alloced; // Linked list of alloced segments in current transaction
+    // struct SegmentNode* temp_alloced; // Linked list of alloced segments in current transaction
     LLNode* to_erase; // segment start addresses of the segments to be erased
+    BloomFilter* filter;
 }Transaction;

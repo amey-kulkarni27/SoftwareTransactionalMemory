@@ -34,6 +34,7 @@
 #include "data_structures.h"
 #include "helper_functions.h"
 #include "readers_writer.h"
+#include "bloom_filter.h"
 
 #include "macros.h"
 
@@ -51,19 +52,19 @@ shared_t tm_create(size_t size, size_t align) {
     region -> global_clock = 0;
     region -> size = size;
     region -> align = align;
+    region -> num_allocs = 1;
+    region -> max_size = 1000;
 
-    // We allocate the shared memory buffer such that its words are correctly
-    // aligned.
+    // We allocate the shared memory buffer such that its words are correctly aligned
 
     SegmentNode* first_segment = initNode(region, size);
     // initRWLock(&region->allocation_lock);
     pthread_mutex_init(&(region->allocation_lock), NULL);
+    region -> segments_list = (SegmentNode**)malloc(region->max_size * sizeof(SegmentNode*));
+    region -> segments_list[region->num_allocs] = first_segment;
+    region -> num_allocs++;
     region -> start_segment = first_segment -> segment_start;
-    pthread_mutex_lock(&(region->allocation_lock));
-    // writeLock(&region->allocation_lock);
-    region -> alloced_segments = first_segment;
-    pthread_mutex_unlock(&(region->allocation_lock));
-    // writeUnlock(&region->allocation_lock);
+    // region -> alloced_segments = first_segment;
 
     return (shared_t) region;
 }
@@ -72,17 +73,16 @@ shared_t tm_create(size_t size, size_t align) {
  * @param shared Shared memory region to destroy, with no running transaction
 **/
 void tm_destroy(shared_t shared) {
+    // printf("Destroy\n");
     // TODO: tm_destroy(shared_t)
     MemoryRegion *region = (MemoryRegion *)shared;
-    pthread_mutex_lock(&(region->allocation_lock));
+    // pthread_mutex_lock(&(region->allocation_lock));
     // writeLock(&region->allocation_lock);
-    cleanSegments(region -> alloced_segments);
-    pthread_mutex_unlock(&(region->allocation_lock));
+    // cleanSegments(region);
+    // pthread_mutex_unlock(&(region->allocation_lock));
     // writeUnlock(&region->allocation_lock);
     pthread_mutex_destroy(&(region->allocation_lock));
     // destroyRWLock(&region->allocation_lock);
-    // assert(!(region->start_segment));
-    // free((region->start_segment));
     free(region);
 }
 
@@ -92,7 +92,7 @@ void tm_destroy(shared_t shared) {
 **/
 void* tm_start(shared_t shared) {
     // TODO: tm_start(shared_t)
-    return ((MemoryRegion*) shared) -> start_segment;
+    return (void*)(1ll<<48);
 }
 
 /** [thread-safe] Return the size (in bytes) of the first allocated segment of the shared memory region.
@@ -136,8 +136,9 @@ tx_t tm_begin(shared_t shared, bool is_ro) {
     // the numbers will denote the number of items in the respective linked list, not the actual read/writes of the transaction seen so far
     t -> read_addresses = NULL;
     t -> write_addresses = NULL;
-    t -> temp_alloced = NULL;
+    // t -> temp_alloced = NULL;
     t -> to_erase = NULL;
+    t -> filter = initialiseBloomFilter(200, 4);
 
     return (tx_t)t;
 }
@@ -155,7 +156,7 @@ bool tm_end(shared_t shared, tx_t tx) {
     Transaction* t = (Transaction*) tx;
 
     if(t->is_ro){
-        cleanTransaction(region, t);
+        cleanTransaction(t);
         // Do read-only transactions have allocs and frees?
         // pthread_mutex_lock(&(region->allocation_lock));
         // addSegments(region, t->temp_alloced); // add segments from the temp alloc list
@@ -165,13 +166,13 @@ bool tm_end(shared_t shared, tx_t tx) {
     }
     
     if(!(t->write_addresses)){
-        pthread_mutex_lock(&(region->allocation_lock));
+        // pthread_mutex_lock(&(region->allocation_lock));
         // writeLock(&region->allocation_lock);
-        addSegments(region, t->temp_alloced); // add segments from the temp alloc list
-        removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
-        pthread_mutex_unlock(&(region->allocation_lock));
+        // addSegments(region, t->temp_alloced); // add segments from the temp alloc list
+        // removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
+        // pthread_mutex_unlock(&(region->allocation_lock));
         // writeUnlock(&region->allocation_lock);
-        cleanTransaction(region, t);
+        cleanTransaction(t);
         return true; // cannot have a write transaction without any write addresses
     }
 
@@ -182,7 +183,7 @@ bool tm_end(shared_t shared, tx_t tx) {
     LLNode* write_node = t -> write_addresses;
     assert(write_node);
     if(!acquireLocks(write_node)){
-        cleanTransaction(region, t);
+        cleanTransaction(t);
         return false;
     }
 
@@ -201,7 +202,7 @@ bool tm_end(shared_t shared, tx_t tx) {
             if(!validate(read_node, t->write_addresses, t->rv)){
                 // release locks
                 releaseLocks(write_node, NULL); // all locks have been acquired if we have reached the validate stage
-                cleanTransaction(region, t);
+                cleanTransaction(t);
                 return false;
             }
             read_node = read_node -> next;
@@ -214,14 +215,14 @@ bool tm_end(shared_t shared, tx_t tx) {
     // Clear the lock bit
     writeToLocations(write_node, region->align, wv);
 
-    pthread_mutex_lock(&(region->allocation_lock));
+    // pthread_mutex_lock(&(region->allocation_lock));
     // writeLock(&region->allocation_lock);
-    addSegments(region, t->temp_alloced); // add segments from the temp alloc list
-    removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
-    pthread_mutex_unlock(&(region->allocation_lock));
+    // addSegments(region, t->temp_alloced); // add segments from the temp alloc list
+    // removeSegments(region, t->to_erase); // remove all segment start addresses seen in free
+    // pthread_mutex_unlock(&(region->allocation_lock));
     // writeUnlock(&region->allocation_lock);
 
-    cleanTransaction(region, t);
+    cleanTransaction(t);
 
     return true;
 }
@@ -252,11 +253,16 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
     char* target_bytes = (char*)target;
     assert(source == source_bytes);
 
-    SegmentNode* req_node = nodeFromWordAddress(region, source_bytes, t);
+    size_t s_no = segFromWordAddress(region, source_bytes);
+    SegmentNode* req_node = region->segments_list[s_no];
+    assert(req_node);
+
+    uint64_t sno46 = (uint64_t)s_no;
+    size_t diff = source_bytes - (char *)(s_no<<48);
+    source_bytes = (char*)req_node->segment_start + diff;
     // if(!req_node)
     //     printf("Source Address: %p, added: %p\n", source_bytes, source_bytes+2072);
-    assert(req_node);
-    size_t diff = source_bytes - (char *)(req_node->segment_start);
+    // assert(req_node);
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     assert(req_node->lock_version_number);
     assert(req_node->lock_bit);
@@ -267,7 +273,7 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             uint32_t v_before = (req_node->lock_version_number)[cur_word];
             memcpy(target_bytes, source_bytes, region->align);
             if(((req_node->lock_bit)[cur_word]) || ((req_node->lock_version_number)[cur_word] != v_before) || ((req_node->lock_version_number)[cur_word] > (t->rv))){
-                cleanTransaction(region, t);
+                cleanTransaction(t);
                 return false;
             }
             source_bytes += region->align;
@@ -279,18 +285,26 @@ bool tm_read(shared_t shared, tx_t tx, void const* source, size_t size, void* ta
             size_t cur_word = start_word + i;
             
             // If we have already written at this address
-            LLNode* writtenNode = getWriteNode(source_bytes, t->write_addresses); // returns NULL if this address does not exist
-
-            // sample lock bit and version number
             uint32_t v_before = (req_node->lock_version_number)[cur_word];
-            if(writtenNode){
-                memcpy(target_bytes, writtenNode->value, region->align);
-            }
-            else{
+            // bool seen = isInBloomFilter(t->filter, source_bytes);
+            bool seen = true;
+            if(!seen){
                 memcpy(target_bytes, source_bytes, region->align);
             }
+            else{
+                LLNode* writtenNode = getWriteNode(source_bytes, t->write_addresses); // returns NULL if this address does not exist
+
+                // sample lock bit and version number
+                if(writtenNode){
+                    memcpy(target_bytes, writtenNode->value, region->align);
+                }
+                else{
+                    memcpy(target_bytes, source_bytes, region->align);
+                }
+            }
+            
             if(((req_node->lock_bit)[cur_word]) || ((req_node->lock_version_number)[cur_word] != v_before) || ((req_node->lock_version_number)[cur_word] > (t->rv))){
-                cleanTransaction(region, t);
+                cleanTransaction(t);
                 return false;
             }
             // Create a new node for reading the value
@@ -333,25 +347,24 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
 
     const char* source_bytes = (const char*)source;
     char* target_bytes = (char*)target;
+    // printf("Allocs %zu\n", region->num_allocs);
 
-    SegmentNode* req_node = nodeFromWordAddress(region, target_bytes, t);
+    size_t s_no = segFromWordAddress(region, target_bytes);
+    SegmentNode* req_node = region->segments_list[s_no];
     assert(req_node);
 
-
-    size_t diff = target_bytes - (char *)(req_node->segment_start);
+    uint64_t sno46 = (uint64_t)s_no;
+    size_t diff = target_bytes - (char *)(s_no<<48);
+    target_bytes = (char*)req_node->segment_start + diff;
     size_t start_word = diff / (region->align), num_words = size / (region->align);
     for(size_t i = 0; i < num_words; i++){
         size_t cur_word = start_word + i;
 
         // clock_t start, end;
         // start = clock();
-        LLNode* writtenNode = getWriteNode(target_bytes, t->write_addresses); // returns NULL if this address does not exist
-        // end = clock();
-        // printf("Time taken: %f\n", ((double) (end - start)) / CLOCKS_PER_SEC);
-        // If we have already written at this address
-        if(writtenNode)
-            memcpy(writtenNode -> value, source_bytes, region->align);
-        else{
+        // bool seen = isInBloomFilter(t->filter, target_bytes);
+        bool seen = true;
+        if(!seen){
             // Create a new node for writing the value
             LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
             assert(newWriteNode);
@@ -364,6 +377,31 @@ bool tm_write(shared_t shared, tx_t tx, void const* source, size_t size, void* t
             newWriteNode -> corresponding_segment = req_node;
             newWriteNode -> next = t -> write_addresses;
             t -> write_addresses = newWriteNode;
+            // addToBloomFilter(t->filter, target_bytes);
+        }
+        else{
+            LLNode* writtenNode = getWriteNode(target_bytes, t->write_addresses); // returns NULL if this address does not exist
+            // end = clock();
+            // printf("Time taken: %f\n", ((double) (end - start)) / CLOCKS_PER_SEC);
+            // If we have already written at this address
+            if(writtenNode)
+                memcpy(writtenNode -> value, source_bytes, region->align);
+            else{
+                // Create a new node for writing the value
+                LLNode* newWriteNode = (LLNode*) malloc(sizeof(LLNode));
+                assert(newWriteNode);
+                newWriteNode -> word_num = cur_word;
+                newWriteNode -> location = target_bytes;
+                void* buffer = (void*) malloc(sizeof(region->align));
+                assert(buffer);
+                memcpy(buffer, source_bytes, region->align);
+                newWriteNode -> value = buffer; // storing the value in this buffer
+                newWriteNode -> corresponding_segment = req_node;
+                newWriteNode -> next = t -> write_addresses;
+                t -> write_addresses = newWriteNode;
+                // addToBloomFilter(t->filter, target_bytes);
+        }
+
         }
 
         source_bytes += region->align;
@@ -387,15 +425,26 @@ alloc_t tm_alloc(shared_t shared, tx_t tx, size_t size, void** target) {
     Transaction* t = (Transaction*) tx;
 
     SegmentNode* s_node = initNode(region, size);
-    if(!s_node)
-        return nomem_alloc;
-    s_node -> next = t -> temp_alloced;
-    if(s_node -> next)
-        s_node -> next -> prev = s_node;
-    t -> temp_alloced = s_node;
+    // if(!s_node)
+    //     return nomem_alloc;
+    // s_node -> next = t -> temp_alloced;
+    // if(s_node -> next)
+    //     s_node -> next -> prev = s_node;
+    // t -> temp_alloced = s_node;
 
-    *target = s_node -> segment_start;
-    // given an address, we have to do a linear search through the nodes of segments to find the right one
+    pthread_mutex_lock(&(region->allocation_lock));
+    // since we are told that no segment can be larger than 48 bits
+    uint64_t s_no = (uint64_t)(region->num_allocs);
+    if(region->max_size == region->num_allocs){
+        region->max_size *= 2;
+        region->segments_list = (SegmentNode**)realloc(region->segments_list, region->max_size * sizeof(SegmentNode*));
+    }
+    region->segments_list[s_no] = s_node;
+    region->num_allocs++;
+    *target = (void*)(s_no<<48); // we can get the segment number by looking at the largest 16 bits
+    // it is assumed that there are going to be ≤ 2^16 total allocs
+    pthread_mutex_unlock(&(region->allocation_lock));
+
     // printf("To allocate %p\n", s_node->segment_start);
 
     return success_alloc;

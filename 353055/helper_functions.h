@@ -7,53 +7,11 @@
 #include "readers_writer.h"
 #include "macros.h"
 
-SegmentNode* getNode(MemoryRegion* region, void *segment_start){
-    // writeLock(&region->allocation_lock);
-    pthread_mutex_lock(&(region->allocation_lock));
-    SegmentNode* cur_node = region -> alloced_segments;
-    while(cur_node != NULL){
-        if(cur_node->segment_start == segment_start)
-            break;
-        cur_node = cur_node -> next;
-    }
-    // assert(cur_node);
-    pthread_mutex_unlock(&(region->allocation_lock));
-    // writeUnlock(&region->allocation_lock);
-    return cur_node;
-}
-
 // A bit unsure about this implementation
-SegmentNode* nodeFromWordAddress(MemoryRegion* region, char* address_search, Transaction* t){
-    pthread_mutex_lock(&(region->allocation_lock));
-    // writeLock(&region->allocation_lock);
-    SegmentNode* cur_node = region -> alloced_segments;
-    // assert(cur_node -> next);
-    // printf("CUR %p\n", cur_node->segment_start);
-    while(cur_node != NULL){
-        char* node_start = (char*)(cur_node->segment_start);
-        size_t difference = address_search - node_start;
-        if((node_start <= address_search) && (difference < (cur_node->size))){
-            break;
-        }
-        cur_node = cur_node -> next;
-    }
-    pthread_mutex_unlock(&(region->allocation_lock));
-    // writeUnlock(&region->allocation_lock);
-    if(cur_node)
-        return cur_node;
-
-    // otherwise search from the temp LL
-    cur_node = t -> temp_alloced;
-    while(cur_node != NULL){
-        char* node_start = (char*)(cur_node->segment_start);
-        size_t difference = address_search - node_start;
-        if((node_start <= address_search) && (difference < (cur_node->size))){
-            break;
-        }
-        cur_node = cur_node -> next;
-    }
-
-    return cur_node;
+size_t segFromWordAddress(MemoryRegion* region, char* address_search){
+    uint64_t address_num = (uint64_t)address_search;
+    size_t seg_num = (size_t)(address_num>>48);
+    return seg_num;
 }
 
 
@@ -111,18 +69,14 @@ void cleanAddresses(LLNode* node, bool is_write){
     }
 }
 
-void cleanSegments(SegmentNode* node){
-    SegmentNode* cur = node;
-    while(cur){
-        SegmentNode* nxt = cur -> next;
-        assert(cur -> segment_start);
-        free(cur -> segment_start);
-        free(cur);
-        cur = nxt;
+void cleanSegments(MemoryRegion* region){
+    for(size_t i = 0; i < region->max_size; i++){
+        free(region->segments_list[i]);
     }
+    free(region->segments_list);
 }
 
-void cleanTransaction(MemoryRegion* region, Transaction* t){
+void cleanTransaction(Transaction* t){
     cleanAddresses(t->read_addresses, false);
     cleanAddresses(t->write_addresses, true);
     // cleanSegments(t->temp_alloced);
@@ -190,43 +144,43 @@ SegmentNode* initNode(MemoryRegion* region, size_t size){
     return s_node;
 }
 
-void addSegments(MemoryRegion* region, SegmentNode* temp_segments){
-    if(!temp_segments)
-        return;
-    SegmentNode* old_start = region -> alloced_segments;
-    region -> alloced_segments = temp_segments;
-    while(temp_segments->next){
-        temp_segments = temp_segments -> next;
-    }
-    // temp_segments now points to the last temp alloc node
-    temp_segments -> next = old_start;
-    old_start -> prev = temp_segments;
-}
+// void addSegments(MemoryRegion* region, SegmentNode* temp_segments){
+//     if(!temp_segments)
+//         return;
+//     SegmentNode* old_start = region -> alloced_segments;
+//     region -> alloced_segments = temp_segments;
+//     while(temp_segments->next){
+//         temp_segments = temp_segments -> next;
+//     }
+//     // temp_segments now points to the last temp alloc node
+//     temp_segments -> next = old_start;
+//     old_start -> prev = temp_segments;
+// }
 
-SegmentNode* getRemoveNode(MemoryRegion* region, void *segment_start){
-    SegmentNode* cur_node = region -> alloced_segments;
-    while(cur_node != NULL){
-        if(cur_node->segment_start == segment_start)
-            break;
-        cur_node = cur_node -> next;
-    }
-    // assert(cur_node);
-    return cur_node;
-}
+// SegmentNode* getRemoveNode(MemoryRegion* region, void *segment_start){
+//     SegmentNode* cur_node = region -> alloced_segments;
+//     while(cur_node != NULL){
+//         if(cur_node->segment_start == segment_start)
+//             break;
+//         cur_node = cur_node -> next;
+//     }
+//     // assert(cur_node);
+//     return cur_node;
+// }
 
-void removeSegments(MemoryRegion* region, LLNode* to_erase){
-    while(to_erase){
-        SegmentNode* segment_to_delete = getRemoveNode(region, to_erase->location);
-        assert(segment_to_delete);
-        if(segment_to_delete == region -> alloced_segments){
-            region -> alloced_segments = segment_to_delete -> next;
-            region -> alloced_segments -> prev = NULL;
-        }
-        else{
-            segment_to_delete -> prev -> next = segment_to_delete -> next;
-            segment_to_delete -> next -> prev = segment_to_delete -> prev;
-        }
-        free(segment_to_delete);
-        to_erase = to_erase->next;
-    }
-}
+// void removeSegments(MemoryRegion* region, LLNode* to_erase){
+//     while(to_erase){
+//         SegmentNode* segment_to_delete = getRemoveNode(region, to_erase->location);
+//         assert(segment_to_delete);
+//         if(segment_to_delete == region -> alloced_segments){
+//             region -> alloced_segments = segment_to_delete -> next;
+//             region -> alloced_segments -> prev = NULL;
+//         }
+//         else{
+//             segment_to_delete -> prev -> next = segment_to_delete -> next;
+//             segment_to_delete -> next -> prev = segment_to_delete -> prev;
+//         }
+//         free(segment_to_delete);
+//         to_erase = to_erase->next;
+//     }
+// }
