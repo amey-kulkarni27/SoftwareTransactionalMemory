@@ -71,7 +71,7 @@ void cleanAddresses(LLNode* node, bool is_write){
 }
 
 void cleanSegments(MemoryRegion* region){
-    for(size_t i = 1; i < region->max_size; i++){
+    for(size_t i = 1; i < region->num_allocs; i++){
         if(region->segments_list[i]){
             if(region->segments_list[i]->lock_bit)
                 free(region->segments_list[i]->lock_bit);
