@@ -10,7 +10,7 @@ BloomFilter* initialiseBloomFilter(size_t size, size_t num_hashes) {
     }
 
     filter->size = size;
-    filter->bit_array = (uint8_t*)calloc((size + 7) / 8, sizeof(uint8_t)); // making sure we don't floor by /7
+    filter->bit_array = (uint8_t*)calloc((size + 7) / 8, sizeof(uint8_t)); // making sure we don't floor by /7, allow for padding
     if (!filter->bit_array) {
         free(filter);
         return NULL;
@@ -20,24 +20,24 @@ BloomFilter* initialiseBloomFilter(size_t size, size_t num_hashes) {
     return filter;
 }
 
-uint32_t hashFunction(const char* element, size_t seed) {
+uint32_t hashFunction(const char* address, size_t seed) {
     uint32_t hash = 42 + seed;
-    while (*element != '\0') {
-        hash = (hash << 5) + hash + *element++;
+    while (*address != '\0') {
+        hash = (hash << 5) + hash + *address++;
     }
     return hash;
 }
 
-void addToBloomFilter(BloomFilter* filter, const char* element) {
+void addToBloomFilter(BloomFilter* filter, const char* address) {
     for (int i = 0; i < filter->num_hashes; ++i) {
-        uint32_t hash = hashFunction(element, i) % filter->size;
+        uint32_t hash = hashFunction(address, i) % filter->size;
         filter->bit_array[hash / 8] |= (1 << (hash % 8));
     }
 }
 
-bool isInBloomFilter(const BloomFilter* filter, const char* element) {
+bool isInBloomFilter(const BloomFilter* filter, const char* address) {
     for (int i = 0; i < filter->num_hashes; ++i) {
-        uint32_t hash = hashFunction(element, i) % filter->size;
+        uint32_t hash = hashFunction(address, i) % filter->size;
         if ((filter->bit_array[hash / 8] & (1 << (hash % 8))) == 0) {
             return false; // One of the bits is not set
         }
